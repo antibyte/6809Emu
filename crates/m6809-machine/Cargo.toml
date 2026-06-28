@@ -1,0 +1,11 @@
+[package]
+name = "m6809-machine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+m6809-core = { path = "../m6809-core" }
+m6809-asm = { path = "../m6809-asm" }
+serde = { workspace = true }
+serde_json = { workspace = true }

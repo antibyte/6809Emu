@@ -1,0 +1,51 @@
+---
+pid: 8996
+cwd: "C:\Users\andre\Desktop\6809Emu"
+command: "Set-Location C:\\Users\\andre\\Desktop\\6809Emu; npm run tauri:dev"
+started_at: 2026-06-11T19:41:00.803Z
+running_for_ms: 1395012  
+---
+
+> m6809-emu@0.1.0 tauri:dev
+> node scripts/tauri-dev.js
+
+     Running BeforeDevCommand (`npm run dev`)
+
+> m6809-emu@0.1.0 dev
+> vite
+
+
+  VITE v6.4.3  ready in 1268 ms
+
+  ➜  Local:   http://localhost:1420/
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching C:\Users\andre\Desktop\6809Emu\src-tauri for changes...
+        Info Watching C:\Users\andre\Desktop\6809Emu\crates\m6809-asm for changes...
+        Info Watching C:\Users\andre\Desktop\6809Emu\crates\m6809-core for changes...
+warning: variant `Dp` is never constructed
+  --> crates\m6809-core\src\cpu.rs:37:5
+   |
+34 | enum Reg8 {
+   |      ---- variant in this enum
+...
+37 |     Dp,
+   |     ^^
+   |
+   = note: `Reg8` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: variant `Pc` is never constructed
+  --> crates\m6809-core\src\cpu.rs:47:5
+   |
+41 | enum Reg16 {
+   |      ----- variant in this enum
+...
+47 |     Pc,
+   |     ^^
+   |
+   = note: `Reg16` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: `m6809-core` (lib) generated 2 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running `C:\Users\andre\Desktop\6809Emu\target\debug\m6809-emu.exe`
+error: process didn't exit successfully: `C:\Users\andre\Desktop\6809Emu\target\debug\m6809-emu.exe` (exit code: 0xcfffffff)

@@ -1,0 +1,29 @@
+[package]
+name = "m6809-emu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MC6809 CPU Emulator"
+
+[lib]
+name = "m6809_emu_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+m6809-core = { path = "../crates/m6809-core" }
+m6809-asm = { path = "../crates/m6809-asm" }
+m6809-machine = { path = "../crates/m6809-machine" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+log = { workspace = true }
+tokio = { version = "1", features = ["time"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

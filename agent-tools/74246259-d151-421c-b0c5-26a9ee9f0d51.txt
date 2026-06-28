@@ -1,0 +1,519 @@
+
+FullName                                                                                      Length   
+--------                                                                                      ------   
+C:\Users\andre\Desktop\6809Emu\agent-tools                                                             
+C:\Users\andre\Desktop\6809Emu\crates                                                                  
+C:\Users\andre\Desktop\6809Emu\dist                                                                    
+C:\Users\andre\Desktop\6809Emu\mcps                                                                    
+C:\Users\andre\Desktop\6809Emu\node_modules                                                            
+C:\Users\andre\Desktop\6809Emu\scripts                                                                 
+C:\Users\andre\Desktop\6809Emu\src                                                                     
+C:\Users\andre\Desktop\6809Emu\src-tauri                                                               
+C:\Users\andre\Desktop\6809Emu\target                                                                  
+C:\Users\andre\Desktop\6809Emu\terminals                                                               
+C:\Users\andre\Desktop\6809Emu\.gitignore                                                     100      
+C:\Users\andre\Desktop\6809Emu\Cargo.lock                                                     115962   
+C:\Users\andre\Desktop\6809Emu\Cargo.toml                                                     341      
+C:\Users\andre\Desktop\6809Emu\index.html                                                     297      
+C:\Users\andre\Desktop\6809Emu\package-lock.json                                              63478    
+C:\Users\andre\Desktop\6809Emu\package.json                                                   857      
+C:\Users\andre\Desktop\6809Emu\README.md                                                      1476     
+C:\Users\andre\Desktop\6809Emu\svelte.config.js                                               115      
+C:\Users\andre\Desktop\6809Emu\tsconfig.json                                                  344      
+C:\Users\andre\Desktop\6809Emu\vite.config.ts                                                 709      
+C:\Users\andre\Desktop\6809Emu\agent-tools\6aed7dc3-ca26-4f3b-993b-3dd7e1c76d50.txt           50712    
+C:\Users\andre\Desktop\6809Emu\crates\m6809-asm                                                        
+C:\Users\andre\Desktop\6809Emu\crates\m6809-core                                                       
+C:\Users\andre\Desktop\6809Emu\crates\m6809-machine                                                    
+C:\Users\andre\Desktop\6809Emu\crates\m6809-asm\examples                                               
+C:\Users\andre\Desktop\6809Emu\crates\m6809-asm\src                                                    
+C:\Users\andre\Desktop\6809Emu\crates\m6809-asm\Cargo.toml                                    221      
+C:\Users\andre\Desktop\6809Emu\crates\m6809-core\src                                                   
+C:\Users\andre\Desktop\6809Emu\crates\m6809-core\tests                                                 
+C:\Users\andre\Desktop\6809Emu\crates\m6809-core\Cargo.toml                                   351      
+C:\Users\andre\Desktop\6809Emu\crates\m6809-machine\src                                                
+C:\Users\andre\Desktop\6809Emu\crates\m6809-machine\tests                                              
+C:\Users\andre\Desktop\6809Emu\crates\m6809-machine\Cargo.toml                                264      
+C:\Users\andre\Desktop\6809Emu\dist\assets                                                             
+C:\Users\andre\Desktop\6809Emu\dist\index.html                                                396      
+C:\Users\andre\Desktop\6809Emu\dist\assets\index-CHC8oJxN.css                                 70201    
+C:\Users\andre\Desktop\6809Emu\dist\assets\index-C_3XZ5zH.js                                  383573   
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-400-normal-BEIGL1Tu.woff2  5328     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-400-normal-ugxPyKxw.woff   6976     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-500-normal-DJqRU3vO.woff   7024     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-500-normal-DmUKJPL_.woff2  5356     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-600-normal-8K4wrrwR.woff   7020     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-600-normal-EVf6-Yzo.woff2  5384     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-700-normal-BWTpRfYl.woff2  5336     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-cyrillic-700-normal-CEoEElIJ.woff   7016     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-400-normal-B9oWc5Lo.woff      5664     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-400-normal-C190GLew.woff2     4228     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-500-normal-D7SFKleX.woff      5720     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-500-normal-JpySY46c.woff2     4284     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-600-normal-H7WoG9Et.woff2     4308     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-600-normal-mc2nkWzM.woff      5700     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-700-normal-C6CZE3T8.woff2     4300     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-greek-700-normal-DEigVDxa.woff      5696     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-400-normal-6-qcROiO.woff      27496    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-400-normal-V6pRDFza.woff2     21168    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-500-normal-BWZEU5yA.woff2     21832    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-500-normal-CJOVTJB7.woff      28208    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-600-normal-BfsvjouI.woff      28180    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-600-normal-C8RAYTDA.woff2     21860    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-700-normal-BYuf6tUa.woff2     21908    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-700-normal-D3wTyLJW.woff      28208    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-400-normal-Bc8Ftmh3.woff2 7336     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-400-normal-fXTG6kC5.woff  10128    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-500-normal-ckzbgY84.woff  10336    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-500-normal-Cut-4mMH.woff2 7528     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-600-normal-BfB_LPfz.woff2 7512     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-600-normal-DObL3zCW.woff  10316    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-700-normal-CxPITLHs.woff  10304    
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-latin-ext-700-normal-CZipNAKV.woff2 7472     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-vietnamese-400-normal-CqNFfHCs.woff 5372     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-vietnamese-500-normal-DNRqzVM1.woff 5476     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-vietnamese-600-normal-OWROknRo.woff 5476     
+C:\Users\andre\Desktop\6809Emu\dist\assets\jetbrains-mono-vietnamese-700-normal-BDLVIk2r.woff 5452     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-400-normal-BnQMeOim.woff       17004    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-400-normal-CJ-V5oYT.woff2      13388    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-500-normal-CNSSEhBt.woff       16988    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-500-normal-lFbtlQH6.woff2      13312    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-600-normal-BflQw4A9.woff       16884    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-600-normal-DjKNqYRj.woff2      13284    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-700-normal-CwsQ-cCU.woff       16416    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-700-normal-RjhwGPKo.woff2      12840    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-400-normal-CfP_5XZW.woff2  12256    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-400-normal-DRPE3kg4.woff   16788    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-500-normal-3dgZTiw9.woff   16788    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-500-normal-DUe3BAxM.woff2  12272    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-600-normal-DxxdqCpr.woff2  12288    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-600-normal-VcznFIpX.woff   16728    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-700-normal-BQnZhY3m.woff2  11992    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-latin-ext-700-normal-HVCqSBdx.woff   16460    
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-400-normal-B7xT_GF5.woff2 4296     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-400-normal-BIWiOVfw.woff  5728     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-500-normal-BmEvtly_.woff2 4324     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-500-normal-BTqKIpxg.woff  5716     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-600-normal-D6zpsUhD.woff  5704     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-600-normal-DUi7WF5p.woff2 4312     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-700-normal-DMty7AZE.woff2 4204     
+C:\Users\andre\Desktop\6809Emu\dist\assets\space-grotesk-vietnamese-700-normal-Duxec5Rn.woff  5588     
+C:\Users\andre\Desktop\6809Emu\mcps\grok_com_github                                                    
+C:\Users\andre\Desktop\6809Emu\mcps\grok_com_linear                                                    
+C:\Users\andre\Desktop\6809Emu\mcps\grok_com_github\tools                                              
+C:\Users\andre\Desktop\6809Emu\mcps\grok_com_linear\tools                                              
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin                                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\.vite                                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\.vite-temp                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\@esbuild                                                   
+C:\Users\andre\Desktop\6809Emu\node_modules\@fontsource                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\@jridgewell                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\@lezer                                                     
+C:\Users\andre\Desktop\6809Emu\node_modules\@marijn                                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\@rollup                                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\@sveltejs                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\@tauri-apps                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\@tsconfig                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\@types                                                     
+C:\Users\andre\Desktop\6809Emu\node_modules\acorn                                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\aria-query                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\axobject-query                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\clsx                                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\codemirror                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt                                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\debug                                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\devalue                                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\esbuild                                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env                                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\esrap                                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\fdir                                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\is-reference                                               
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur                                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\locate-character                                           
+C:\Users\andre\Desktop\6809Emu\node_modules\magic-string                                               
+C:\Users\andre\Desktop\6809Emu\node_modules\ms                                                         
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid                                                     
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\picomatch                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\postcss                                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\rollup                                                     
+C:\Users\andre\Desktop\6809Emu\node_modules\source-map-js                                              
+C:\Users\andre\Desktop\6809Emu\node_modules\style-mod                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte                                                     
+C:\Users\andre\Desktop\6809Emu\node_modules\tinyglobby                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\vite                                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\vitefu                                                     
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\zimmerframe                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\.package-lock.json                                64399    
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\acorn                                        379      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\acorn.cmd                                    320      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\acorn.ps1                                    785      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\esbuild                                      387      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\esbuild.cmd                                  324      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\esbuild.ps1                                  801      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\nanoid                                       391      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\nanoid.cmd                                   326      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\nanoid.ps1                                   809      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\rollup                                       393      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\rollup.cmd                                   327      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\rollup.ps1                                   813      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tauri                                        397      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tauri.cmd                                    329      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tauri.ps1                                    821      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tsc                                          385      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tsc.cmd                                      323      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tsc.ps1                                      797      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tsserver                                     395      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tsserver.cmd                                 328      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\tsserver.ps1                                 817      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\vite                                         381      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\vite.cmd                                     321      
+C:\Users\andre\Desktop\6809Emu\node_modules\.bin\vite.ps1                                     789      
+C:\Users\andre\Desktop\6809Emu\node_modules\.vite\deps                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\.vite\_svelte_metadata.json                       958      
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\autocomplete                                   
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\commands                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\lang-cpp                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\language                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\lint                                           
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\search                                         
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\state                                          
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\theme-one-dark                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\@codemirror\view                                           
+C:\Users\andre\Desktop\6809Emu\node_modules\@esbuild\win32-x64                                         
+C:\Users\andre\Desktop\6809Emu\node_modules\@fontsource\jetbrains-mono                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\@fontsource\space-grotesk                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\@jridgewell\gen-mapping                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\@jridgewell\remapping                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\@jridgewell\resolve-uri                                    
+C:\Users\andre\Desktop\6809Emu\node_modules\@jridgewell\sourcemap-codec                                
+C:\Users\andre\Desktop\6809Emu\node_modules\@jridgewell\trace-mapping                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\@lezer\common                                              
+C:\Users\andre\Desktop\6809Emu\node_modules\@lezer\cpp                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\@lezer\highlight                                           
+C:\Users\andre\Desktop\6809Emu\node_modules\@lezer\lr                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\@marijn\find-cluster-break                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\@rollup\rollup-win32-x64-gnu                               
+C:\Users\andre\Desktop\6809Emu\node_modules\@rollup\rollup-win32-x64-msvc                              
+C:\Users\andre\Desktop\6809Emu\node_modules\@sveltejs\acorn-typescript                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\@sveltejs\vite-plugin-svelte                               
+C:\Users\andre\Desktop\6809Emu\node_modules\@sveltejs\vite-plugin-svelte-inspector                     
+C:\Users\andre\Desktop\6809Emu\node_modules\@tauri-apps\api                                            
+C:\Users\andre\Desktop\6809Emu\node_modules\@tauri-apps\cli                                            
+C:\Users\andre\Desktop\6809Emu\node_modules\@tauri-apps\cli-win32-x64-msvc                             
+C:\Users\andre\Desktop\6809Emu\node_modules\@tauri-apps\plugin-dialog                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\@tauri-apps\plugin-fs                                      
+C:\Users\andre\Desktop\6809Emu\node_modules\@tsconfig\svelte                                           
+C:\Users\andre\Desktop\6809Emu\node_modules\@types\estree                                              
+C:\Users\andre\Desktop\6809Emu\node_modules\@types\trusted-types                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\acorn\bin                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\acorn\dist                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\acorn\CHANGELOG.md                                24187    
+C:\Users\andre\Desktop\6809Emu\node_modules\acorn\LICENSE                                     1099     
+C:\Users\andre\Desktop\6809Emu\node_modules\acorn\package.json                                1067     
+C:\Users\andre\Desktop\6809Emu\node_modules\acorn\README.md                                   11495    
+C:\Users\andre\Desktop\6809Emu\node_modules\aria-query\lib                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\aria-query\LICENSE                                10236    
+C:\Users\andre\Desktop\6809Emu\node_modules\aria-query\package.json                           2024     
+C:\Users\andre\Desktop\6809Emu\node_modules\aria-query\README.md                              7134     
+C:\Users\andre\Desktop\6809Emu\node_modules\axobject-query\lib                                         
+C:\Users\andre\Desktop\6809Emu\node_modules\axobject-query\LICENSE                            10236    
+C:\Users\andre\Desktop\6809Emu\node_modules\axobject-query\package.json                       2048     
+C:\Users\andre\Desktop\6809Emu\node_modules\axobject-query\README.md                          21175    
+C:\Users\andre\Desktop\6809Emu\node_modules\clsx\dist                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\clsx\clsx.d.mts                                   278      
+C:\Users\andre\Desktop\6809Emu\node_modules\clsx\clsx.d.ts                                    337      
+C:\Users\andre\Desktop\6809Emu\node_modules\clsx\license                                      1104     
+C:\Users\andre\Desktop\6809Emu\node_modules\clsx\package.json                                 1192     
+C:\Users\andre\Desktop\6809Emu\node_modules\clsx\readme.md                                    4003     
+C:\Users\andre\Desktop\6809Emu\node_modules\codemirror\.github                                         
+C:\Users\andre\Desktop\6809Emu\node_modules\codemirror\dist                                            
+C:\Users\andre\Desktop\6809Emu\node_modules\codemirror\CHANGELOG.md                           1581     
+C:\Users\andre\Desktop\6809Emu\node_modules\codemirror\LICENSE                                1118     
+C:\Users\andre\Desktop\6809Emu\node_modules\codemirror\package.json                           1081     
+C:\Users\andre\Desktop\6809Emu\node_modules\codemirror\README.md                              1487     
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt\dist                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt\index.d.ts                                  280      
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt\index.js                                    951      
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt\LICENSE                                     1089     
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt\package.json                                771      
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt\README.md                                   764      
+C:\Users\andre\Desktop\6809Emu\node_modules\crelt\rollup.config.js                            269      
+C:\Users\andre\Desktop\6809Emu\node_modules\debug\src                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\debug\LICENSE                                     1139     
+C:\Users\andre\Desktop\6809Emu\node_modules\debug\package.json                                1479     
+C:\Users\andre\Desktop\6809Emu\node_modules\debug\README.md                                   22115    
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\dist                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\.editorconfig                           113      
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\.eslintcache                            382      
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\changelog.md                            9785     
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\index.d.ts                              823      
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\index.js                                3293     
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\license.txt                             1116     
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\package.json                            1152     
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\readme.md                               5682     
+C:\Users\andre\Desktop\6809Emu\node_modules\deepmerge\rollup.config.js                        343      
+C:\Users\andre\Desktop\6809Emu\node_modules\devalue\src                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\devalue\types                                              
+C:\Users\andre\Desktop\6809Emu\node_modules\devalue\index.js                                  204      
+C:\Users\andre\Desktop\6809Emu\node_modules\devalue\LICENSE                                   1121     
+C:\Users\andre\Desktop\6809Emu\node_modules\devalue\package.json                              1007     
+C:\Users\andre\Desktop\6809Emu\node_modules\devalue\README.md                                 6899     
+C:\Users\andre\Desktop\6809Emu\node_modules\esbuild\bin                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\esbuild\lib                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\esbuild\install.js                                11160    
+C:\Users\andre\Desktop\6809Emu\node_modules\esbuild\LICENSE.md                                1069     
+C:\Users\andre\Desktop\6809Emu\node_modules\esbuild\package.json                              1490     
+C:\Users\andre\Desktop\6809Emu\node_modules\esbuild\README.md                                 175      
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\browser-fallback.js                       46       
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\CHANGELOG.md                              529      
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\dev-fallback.js                           123      
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\false.js                                  22       
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\index.d.ts                                86       
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\index.js                                  156      
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\LICENSE                                   1063     
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\package.json                              768      
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\README.md                                 970      
+C:\Users\andre\Desktop\6809Emu\node_modules\esm-env\true.js                                   21       
+C:\Users\andre\Desktop\6809Emu\node_modules\esrap\src                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\esrap\types                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\esrap\LICENSE                                     1118     
+C:\Users\andre\Desktop\6809Emu\node_modules\esrap\package.json                                1840     
+C:\Users\andre\Desktop\6809Emu\node_modules\esrap\README.md                                   5106     
+C:\Users\andre\Desktop\6809Emu\node_modules\fdir\dist                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\fdir\LICENSE                                      1053     
+C:\Users\andre\Desktop\6809Emu\node_modules\fdir\package.json                                 2694     
+C:\Users\andre\Desktop\6809Emu\node_modules\fdir\README.md                                    3851     
+C:\Users\andre\Desktop\6809Emu\node_modules\is-reference\src                                           
+C:\Users\andre\Desktop\6809Emu\node_modules\is-reference\types                                         
+C:\Users\andre\Desktop\6809Emu\node_modules\is-reference\package.json                         1012     
+C:\Users\andre\Desktop\6809Emu\node_modules\is-reference\README.md                            1195     
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\colors.d.ts                                 1300     
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\colors.js                                   1520     
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\colors.mjs                                  1645     
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\index.d.ts                                  813      
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\index.js                                    2745     
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\index.mjs                                   2743     
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\license                                     1114     
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\package.json                                990      
+C:\Users\andre\Desktop\6809Emu\node_modules\kleur\readme.md                                   7380     
+C:\Users\andre\Desktop\6809Emu\node_modules\locate-character\src                                       
+C:\Users\andre\Desktop\6809Emu\node_modules\locate-character\types                                     
+C:\Users\andre\Desktop\6809Emu\node_modules\locate-character\package.json                     1005     
+C:\Users\andre\Desktop\6809Emu\node_modules\locate-character\README.md                        1691     
+C:\Users\andre\Desktop\6809Emu\node_modules\magic-string\dist                                          
+C:\Users\andre\Desktop\6809Emu\node_modules\magic-string\LICENSE                              1051     
+C:\Users\andre\Desktop\6809Emu\node_modules\magic-string\package.json                         1840     
+C:\Users\andre\Desktop\6809Emu\node_modules\magic-string\README.md                            12608    
+C:\Users\andre\Desktop\6809Emu\node_modules\ms\index.js                                       3024     
+C:\Users\andre\Desktop\6809Emu\node_modules\ms\license.md                                     1079     
+C:\Users\andre\Desktop\6809Emu\node_modules\ms\package.json                                   732      
+C:\Users\andre\Desktop\6809Emu\node_modules\ms\readme.md                                      1886     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\.claude                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\async                                               
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\bin                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\non-secure                                          
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\url-alphabet                                        
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\index.browser.cjs                          2834     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\index.browser.js                           1064     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\index.cjs                                  3430     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\index.d.cts                                2252     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\index.d.ts                                 2252     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\index.js                                   1397     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\LICENSE                                    1095     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\nanoid.js                                  169      
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\package.json                               2283     
+C:\Users\andre\Desktop\6809Emu\node_modules\nanoid\README.md                                  1552     
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors\LICENSE                                787      
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors\package.json                           552      
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors\picocolors.browser.js                  598      
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors\picocolors.d.ts                        138      
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors\picocolors.js                          2663     
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors\README.md                              622      
+C:\Users\andre\Desktop\6809Emu\node_modules\picocolors\types.d.ts                             1013     
+C:\Users\andre\Desktop\6809Emu\node_modules\picomatch\lib                                              
+C:\Users\andre\Desktop\6809Emu\node_modules\picomatch\index.js                                479      
+C:\Users\andre\Desktop\6809Emu\node_modules\picomatch\LICENSE                                 1091     
+C:\Users\andre\Desktop\6809Emu\node_modules\picomatch\package.json                            1896     
+C:\Users\andre\Desktop\6809Emu\node_modules\picomatch\posix.js                                60       
+C:\Users\andre\Desktop\6809Emu\node_modules\picomatch\README.md                               28332    
+C:\Users\andre\Desktop\6809Emu\node_modules\postcss\lib                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\postcss\LICENSE                                   1095     
+C:\Users\andre\Desktop\6809Emu\node_modules\postcss\package.json                              2497     
+C:\Users\andre\Desktop\6809Emu\node_modules\postcss\README.md                                 1156     
+C:\Users\andre\Desktop\6809Emu\node_modules\rollup\dist                                                
+C:\Users\andre\Desktop\6809Emu\node_modules\rollup\LICENSE.md                                 35231    
+C:\Users\andre\Desktop\6809Emu\node_modules\rollup\package.json                               12427    
+C:\Users\andre\Desktop\6809Emu\node_modules\rollup\README.md                                  9999     
+C:\Users\andre\Desktop\6809Emu\node_modules\source-map-js\lib                                          
+C:\Users\andre\Desktop\6809Emu\node_modules\source-map-js\LICENSE                             1526     
+C:\Users\andre\Desktop\6809Emu\node_modules\source-map-js\package.json                        2548     
+C:\Users\andre\Desktop\6809Emu\node_modules\source-map-js\README.md                           26040    
+C:\Users\andre\Desktop\6809Emu\node_modules\source-map-js\source-map.d.ts                     3408     
+C:\Users\andre\Desktop\6809Emu\node_modules\source-map-js\source-map.js                       405      
+C:\Users\andre\Desktop\6809Emu\node_modules\style-mod\dist                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\style-mod\src                                              
+C:\Users\andre\Desktop\6809Emu\node_modules\style-mod\test                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\style-mod\LICENSE                                 1100     
+C:\Users\andre\Desktop\6809Emu\node_modules\style-mod\package.json                            1153     
+C:\Users\andre\Desktop\6809Emu\node_modules\style-mod\README.md                               3680     
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\compiler                                            
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\src                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\types                                               
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\action.d.ts                                27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\animate.d.ts                               27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\compiler.d.ts                              27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\easing.d.ts                                27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\elements.d.ts                              87411    
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\index.d.ts                                 27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\legacy.d.ts                                27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\LICENSE.md                                 1126     
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\motion.d.ts                                27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\package.json                               5663     
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\README.md                                  1799     
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\store.d.ts                                 27       
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\svelte-html.d.ts                           10938    
+C:\Users\andre\Desktop\6809Emu\node_modules\svelte\transition.d.ts                            27       
+C:\Users\andre\Desktop\6809Emu\node_modules\tinyglobby\dist                                            
+C:\Users\andre\Desktop\6809Emu\node_modules\tinyglobby\LICENSE                                1076     
+C:\Users\andre\Desktop\6809Emu\node_modules\tinyglobby\package.json                           1761     
+C:\Users\andre\Desktop\6809Emu\node_modules\tinyglobby\README.md                              931      
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript\bin                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript\lib                                             
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript\LICENSE.txt                            9197     
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript\package.json                           3620     
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript\README.md                              2842     
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript\SECURITY.md                            2656     
+C:\Users\andre\Desktop\6809Emu\node_modules\typescript\ThirdPartyNoticeText.txt               37824    
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\bin                                                   
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\dist                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\misc                                                  
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\types                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\client.d.ts                                  5109     
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\index.cjs                                    2717     
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\index.d.cts                                  209      
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\LICENSE.md                                   115624   
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\package.json                                 5251     
+C:\Users\andre\Desktop\6809Emu\node_modules\vite\README.md                                    1152     
+C:\Users\andre\Desktop\6809Emu\node_modules\vitefu\src                                                 
+C:\Users\andre\Desktop\6809Emu\node_modules\vitefu\LICENSE                                    1074     
+C:\Users\andre\Desktop\6809Emu\node_modules\vitefu\package.json                               1029     
+C:\Users\andre\Desktop\6809Emu\node_modules\vitefu\README.md                                  123      
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\.tern-port                            5        
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\index.cjs                             2777     
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\index.d.cts                           146      
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\index.d.ts                            146      
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\index.js                              2630     
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\LICENSE                               1100     
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\package.json                          842      
+C:\Users\andre\Desktop\6809Emu\node_modules\w3c-keyname\README.md                             735      
+C:\Users\andre\Desktop\6809Emu\node_modules\zimmerframe\src                                            
+C:\Users\andre\Desktop\6809Emu\node_modules\zimmerframe\types                                          
+C:\Users\andre\Desktop\6809Emu\node_modules\zimmerframe\LICENSE                               1135     
+C:\Users\andre\Desktop\6809Emu\node_modules\zimmerframe\package.json                          735      
+C:\Users\andre\Desktop\6809Emu\node_modules\zimmerframe\README.md                             5176     
+C:\Users\andre\Desktop\6809Emu\scripts\free-port.js                                           1073     
+C:\Users\andre\Desktop\6809Emu\scripts\tauri-cli.js                                           400      
+C:\Users\andre\Desktop\6809Emu\scripts\tauri-dev.js                                           1500     
+C:\Users\andre\Desktop\6809Emu\src\lib                                                                 
+C:\Users\andre\Desktop\6809Emu\src\app.css                                                    4176     
+C:\Users\andre\Desktop\6809Emu\src\App.svelte                                                 32496    
+C:\Users\andre\Desktop\6809Emu\src\main.ts                                                    519      
+C:\Users\andre\Desktop\6809Emu\src\vite-env.d.ts                                              70       
+C:\Users\andre\Desktop\6809Emu\src\lib\codemirror                                                      
+C:\Users\andre\Desktop\6809Emu\src\lib\components                                                      
+C:\Users\andre\Desktop\6809Emu\src\lib\i18n                                                            
+C:\Users\andre\Desktop\6809Emu\src\lib\api.ts                                                 7093     
+C:\Users\andre\Desktop\6809Emu\src\lib\examples.ts                                            1702     
+C:\Users\andre\Desktop\6809Emu\src\lib\shortcuts.ts                                           925      
+C:\Users\andre\Desktop\6809Emu\src\lib\theme.ts                                               757      
+C:\Users\andre\Desktop\6809Emu\src\lib\toast.ts                                               619      
+C:\Users\andre\Desktop\6809Emu\src\lib\types.ts                                               1504     
+C:\Users\andre\Desktop\6809Emu\src-tauri\capabilities                                                  
+C:\Users\andre\Desktop\6809Emu\src-tauri\gen                                                           
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons                                                         
+C:\Users\andre\Desktop\6809Emu\src-tauri\src                                                           
+C:\Users\andre\Desktop\6809Emu\src-tauri\build.rs                                             38       
+C:\Users\andre\Desktop\6809Emu\src-tauri\Cargo.toml                                           756      
+C:\Users\andre\Desktop\6809Emu\src-tauri\icon-source.jpg                                      195811   
+C:\Users\andre\Desktop\6809Emu\src-tauri\icon-source.png                                      195811   
+C:\Users\andre\Desktop\6809Emu\src-tauri\tauri.conf.json                                      782      
+C:\Users\andre\Desktop\6809Emu\src-tauri\capabilities\default.json                            308      
+C:\Users\andre\Desktop\6809Emu\src-tauri\gen\schemas                                                   
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\android                                                 
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\ios                                                     
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\128x128.png                                    24254    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\128x128@2x.png                                 81304    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\32x32.png                                      2232     
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\64x64.png                                      6872     
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\icon.icns                                      1403418  
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\icon.ico                                       97093    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\icon.png                                       256330   
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square107x107Logo.png                          17812    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square142x142Logo.png                          28768    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square150x150Logo.png                          31632    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square284x284Logo.png                          97929    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square30x30Logo.png                            2000     
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square310x310Logo.png                          113441   
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square44x44Logo.png                            3676     
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square71x71Logo.png                            8194     
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\Square89x89Logo.png                            12784    
+C:\Users\andre\Desktop\6809Emu\src-tauri\icons\StoreLogo.png                                  4543     
+C:\Users\andre\Desktop\6809Emu\src-tauri\src\commands.rs                                      16783    
+C:\Users\andre\Desktop\6809Emu\src-tauri\src\lib.rs                                           2235     
+C:\Users\andre\Desktop\6809Emu\src-tauri\src\main.rs                                          106      
+C:\Users\andre\Desktop\6809Emu\src-tauri\src\state.rs                                         998      
+C:\Users\andre\Desktop\6809Emu\target\debug                                                            
+C:\Users\andre\Desktop\6809Emu\target\release                                                          
+C:\Users\andre\Desktop\6809Emu\target\tmp                                                              
+C:\Users\andre\Desktop\6809Emu\target\.rustc_info.json                                        1113     
+C:\Users\andre\Desktop\6809Emu\target\CACHEDIR.TAG                                            177      
+C:\Users\andre\Desktop\6809Emu\target\debug\.fingerprint                                               
+C:\Users\andre\Desktop\6809Emu\target\debug\build                                                      
+C:\Users\andre\Desktop\6809Emu\target\debug\deps                                                       
+C:\Users\andre\Desktop\6809Emu\target\debug\examples                                                   
+C:\Users\andre\Desktop\6809Emu\target\debug\incremental                                                
+C:\Users\andre\Desktop\6809Emu\target\debug\.cargo-lock                                       0        
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_asm.d                                    747      
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_asm.rlib                                 2598768  
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_core.d                                   689      
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_core.rlib                                4490412  
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_emu_lib.d                                19157    
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_emu_lib.rlib                             320444870
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_machine.d                                1345     
+C:\Users\andre\Desktop\6809Emu\target\debug\libm6809_machine.rlib                             5339618  
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809-emu.d                                       19202    
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809-emu.exe                                     17218048 
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809_emu.pdb                                     120934400
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809_emu_lib.d                                   19153    
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809_emu_lib.dll                                 149504   
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809_emu_lib.dll.exp                             661      
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809_emu_lib.dll.lib                             1680     
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809_emu_lib.lib                                 744685904
+C:\Users\andre\Desktop\6809Emu\target\debug\m6809_emu_lib.pdb                                 91099136 
+C:\Users\andre\Desktop\6809Emu\target\release\.fingerprint                                             
+C:\Users\andre\Desktop\6809Emu\target\release\build                                                    
+C:\Users\andre\Desktop\6809Emu\target\release\bundle                                                   
+C:\Users\andre\Desktop\6809Emu\target\release\deps                                                     
+C:\Users\andre\Desktop\6809Emu\target\release\examples                                                 
+C:\Users\andre\Desktop\6809Emu\target\release\incremental                                              
+C:\Users\andre\Desktop\6809Emu\target\release\nsis                                                     
+C:\Users\andre\Desktop\6809Emu\target\release\resources                                                
+C:\Users\andre\Desktop\6809Emu\target\release\wix                                                      
+C:\Users\andre\Desktop\6809Emu\target\release\.cargo-lock                                     0        
+C:\Users\andre\Desktop\6809Emu\target\release\m6809-emu.d                                     1872     
+C:\Users\andre\Desktop\6809Emu\target\release\m6809-emu.exe                                   11048960 
+C:\Users\andre\Desktop\6809Emu\target\release\m6809_emu.pdb                                   5722112  
+C:\Users\andre\Desktop\6809Emu\terminals\.next-id                                             20       
+C:\Users\andre\Desktop\6809Emu\terminals\1.txt                                                19189    
+C:\Users\andre\Desktop\6809Emu\terminals\2.txt                                                4258     
+C:\Users\andre\Desktop\6809Emu\terminals\3.txt                                                4280     
+C:\Users\andre\Desktop\6809Emu\terminals\4.txt                                                4282     
+C:\Users\andre\Desktop\6809Emu\terminals\5.txt                                                8245     
+C:\Users\andre\Desktop\6809Emu\terminals\6.txt                                                1693     
+
+

@@ -1,0 +1,290 @@
+---
+pid: 13840
+cwd: "C:\Users\andre\Desktop\6809Emu"
+command: "npx tauri dev"
+started_at: 2026-06-11T19:33:37.761Z
+running_for_ms: 1835010  
+---
+     Running BeforeDevCommand (`npm run dev`)
+
+> m6809-emu@0.1.0 dev
+> vite
+
+
+  VITE v6.4.3  ready in 1402 ms
+
+  ➜  Local:   http://localhost:1420/
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching C:\Users\andre\Desktop\6809Emu\src-tauri for changes...
+        Info Watching C:\Users\andre\Desktop\6809Emu\crates\m6809-asm for changes...
+        Info Watching C:\Users\andre\Desktop\6809Emu\crates\m6809-core for changes...
+   Compiling winreg v0.55.0
+   Compiling time v0.3.47
+   Compiling urlpattern v0.3.0
+   Compiling idna_adapter v1.2.2
+   Compiling crc32fast v1.5.0
+   Compiling winapi-util v0.1.11
+   Compiling dpi v0.1.2
+   Compiling webview2-com-sys v0.38.2
+   Compiling uuid v1.23.3
+   Compiling jsonptr v0.6.3
+   Compiling crossbeam-utils v0.8.21
+   Compiling erased-serde v0.4.10
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling serde_spanned v1.1.1
+   Compiling phf_shared v0.13.1
+   Compiling windows-version v0.1.7
+    Building [=================>       ] 270/372: webvi...                                                               Compiling idna v1.1.0
+    Building [=================>       ] 271/372: webvi...                                                               Compiling embed-resource v3.0.9
+    Building [=================>       ] 272/372: webvi...                                                               Compiling same-file v1.0.6
+    Building [=================>       ] 273/372: webvi...                                                               Compiling flate2 v1.1.9
+    Building [=================>       ] 274/372: webvi...    Building [=================>       ] 275/372: time,...                                                               Compiling pin-project-lite v0.2.17
+    Building [=================>       ] 276/372: time,...                                                               Compiling once_cell v1.21.4
+    Building [=================>       ] 277/372: time,...                                                               Compiling unicode-segmentation v1.13.3
+    Building [=================>       ] 278/372: unico...                                                               Compiling json-patch v3.0.1
+    Building [=================>       ] 280/372: unico...                                                               Compiling tauri-utils v2.9.2
+    Building [=================>       ] 281/372: unico...                                                               Compiling tauri-winres v0.3.6
+    Building [=================>       ] 282/372: unico...                                                               Compiling url v2.5.8
+    Building [==================>      ] 283/372: unico...                                                               Compiling cfb v0.7.3
+    Building [==================>      ] 284/372: unico...                                                               Compiling png v0.17.16
+    Building [==================>      ] 285/372: unico...                                                               Compiling serde-untagged v0.1.9
+    Building [==================>      ] 286/372: unico...                                                               Compiling crossbeam-channel v0.5.15
+    Building [==================>      ] 287/372: unico...                                                               Compiling phf v0.13.1
+   Compiling toml v1.1.2+spec-1.1.0
+    Building [==================>      ] 289/372: unico...                                                               Compiling walkdir v2.5.0
+    Building [==================>      ] 290/372: unico...                                                               Compiling serde_with v3.21.0
+    Building [==================>      ] 292/372: time,...                                                               Compiling semver v1.0.28
+   Compiling tracing-core v0.1.36
+    Building [===================>     ] 298/372: time,...                                                               Compiling sha2 v0.10.9
+    Building [===================>     ] 302/372: time,...                                                               Compiling windows_x86_64_msvc v0.53.1
+    Building [===================>     ] 307/372: time,...                                                               Compiling keyboard-types v0.7.0
+    Building [===================>     ] 308/372: time,...                                                               Compiling cookie v0.18.1
+    Building [===================>     ] 309/372: time,...                                                               Compiling plist v1.9.0
+    Building [===================>     ] 310/372: time,...                                                               Compiling infer v0.19.0
+    Building [===================>     ] 311/372: time,...    Building [===================>     ] 312/372: time,...                                                               Compiling tracing v0.1.44
+    Building [====================>    ] 313/372: time,...                                                               Compiling ico v0.5.0
+    Building [====================>    ] 314/372: time,...                                                               Compiling softbuffer v0.4.8
+    Building [====================>    ] 315/372: time,...                                                               Compiling tao v0.35.3
+   Compiling dirs-sys v0.5.0
+    Building [====================>    ] 317/372: tao, ...                                                               Compiling windows-sys v0.59.0
+    Building [====================>    ] 318/372: tao, ...                                                               Compiling serialize-to-javascript v0.1.2
+    Building [====================>    ] 320/372: tao, ...                                                               Compiling dirs v6.0.0
+    Building [====================>    ] 321/372: tao, ...                                                               Compiling windows-targets v0.53.5
+    Building [====================>    ] 322/372: tao, ...                                                               Compiling getrandom v0.3.4
+    Building [====================>    ] 323/372: tao, ...                                                               Compiling tokio v1.52.3
+    Building [====================>    ] 324/372: tao, ...                                                               Compiling mime v0.3.17
+    Building [====================>    ] 326/372: tao, ...                                                               Compiling windows-sys v0.60.2
+    Building [=====================>   ] 329/372: tao, ...                                                               Compiling m6809-core v0.1.0 (C:\Users\andre\Desktop\6809Emu\crates\m6809-core)
+    Building [=====================>   ] 330/372: tao, ...                                                               Compiling muda v0.19.2
+    Building [=====================>   ] 331/372: tao, ...    Building [=====================>   ] 332/372: tao, ...    Building [=====================>   ] 333/372: tao, ...    Building [=====================>   ] 334/372: tao, ...    Building [=====================>   ] 335/372: tao, ...    Building [=====================>   ] 336/372: tao, ...    Building [=====================>   ] 337/372: tao, ...    Building [=====================>   ] 338/372: tao, ...                                                            warning: type `Reg8` is more private than the item `Cpu::set_reg8`
+   --> crates\m6809-core\src\cpu.rs:136:5
+    |
+136 |     pub fn set_reg8(&mut self, reg: Reg8, value: u8) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::set_reg8` is reachable at visibility `pub`
+    |
+note: but type `Reg8` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:34:1
+    |
+34  | enum Reg8 {
+    | ^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+    Building [=====================>   ] 338/372: tao, ...                                                            warning: type `Reg8` is more private than the item `Cpu::get_reg8`
+   --> crates\m6809-core\src\cpu.rs:144:5
+    |
+144 |     pub fn get_reg8(&self, reg: Reg8) -> u8 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::get_reg8` is reachable at visibility `pub`
+    |
+note: but type `Reg8` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:34:1
+    |
+34  | enum Reg8 {
+    | ^^^^^^^^^
+
+warning: type `Reg16` is more private than the item `Cpu::set_reg16`
+   --> crates\m6809-core\src\cpu.rs:152:5
+    |
+152 |     pub fn set_reg16(&mut self, reg: Reg16, value: u16) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::set_reg16` is reachable at visibility `pub`
+    |
+note: but type `Reg16` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:41:1
+    |
+41  | enum Reg16 {
+    | ^^^^^^^^^^
+
+warning: type `Reg16` is more private than the item `Cpu::get_reg16`
+   --> crates\m6809-core\src\cpu.rs:166:5
+    |
+166 |     pub fn get_reg16(&self, reg: Reg16) -> u16 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::get_reg16` is reachable at visibility `pub`
+    |
+note: but type `Reg16` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:41:1
+    |
+41  | enum Reg16 {
+    | ^^^^^^^^^^
+
+    Building [=====================>   ] 338/372: tao, ...                                                            warning: variant `Dp` is never constructed
+  --> crates\m6809-core\src\cpu.rs:37:5
+   |
+34 | enum Reg8 {
+   |      ---- variant in this enum
+...
+37 |     Dp,
+   |     ^^
+   |
+   = note: `Reg8` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: variant `Pc` is never constructed
+  --> crates\m6809-core\src\cpu.rs:47:5
+   |
+41 | enum Reg16 {
+   |      ----- variant in this enum
+...
+47 |     Pc,
+   |     ^^
+   |
+   = note: `Reg16` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: methods `branch_if` and `set_logical8` are never used
+   --> crates\m6809-core\src\cpu.rs:304:8
+    |
+58  | impl Cpu {
+    | -------- methods in this implementation
+...
+304 |     fn branch_if(&self, condition: bool) -> bool {
+    |        ^^^^^^^^^
+...
+427 |     fn set_logical8(&mut self, result: u8) {
+    |        ^^^^^^^^^^^^
+
+    Building [=====================>   ] 338/372: tao, ...    Building [=====================>   ] 339/372: tao, ...                                                               Compiling window-vibrancy v0.6.0
+    Building [=====================>   ] 339/372: tao, ...                                                               Compiling m6809-asm v0.1.0 (C:\Users\andre\Desktop\6809Emu\crates\m6809-asm)
+    Building [=====================>   ] 339/372: tao, ...    Building [=====================>   ] 340/372: tao, ...                                                            warning: trait `MnemonicCheck` is never used
+   --> crates\m6809-asm\src\lib.rs:616:7
+    |
+616 | trait MnemonicCheck {
+    |       ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+    Building [=====================>   ] 340/372: tao, ...    Building [=====================>   ] 341/372: tao, ...                                                            warning: `m6809-core` (lib) generated 7 warnings
+    Building [=====================>   ] 342/372: tao, ...                                                            warning: `m6809-asm` (lib) generated 1 warning
+    Building [======================>  ] 343/372: tao, ...                                                               Compiling webview2-com v0.38.2
+    Building [======================>  ] 343/372: tao, ...    Building [======================>  ] 344/372: tao, ...    Building [======================>  ] 345/372: webvi...    Building [======================>  ] 346/372: webvi...                                                               Compiling rfd v0.16.0
+    Building [======================>  ] 346/372: webvi...    Building [======================>  ] 347/372: webvi...    Building [======================>  ] 348/372: webvi...    Building [======================>  ] 349/372: webvi...                                                               Compiling wry v0.55.1
+    Building [======================>  ] 349/372: wry, ...                                                               Compiling tauri-build v2.6.2
+   Compiling tauri-plugin v2.6.2
+   Compiling tauri-codegen v2.6.2
+    Building [======================>  ] 349/372: wry, ...                                                               Compiling tauri-runtime v2.11.2
+    Building [======================>  ] 349/372: wry, ...    Building [======================>  ] 350/372: wry, ...    Building [======================>  ] 351/372: wry, ...                                                               Compiling tauri-runtime-wry v2.11.2
+    Building [======================>  ] 351/372: wry, ...    Building [======================>  ] 352/372: tauri...    Building [======================>  ] 353/372: tauri...    Building [======================>  ] 354/372: tauri...    Building [======================>  ] 355/372: tauri...    Building [======================>  ] 356/372: tauri...                                                               Compiling tauri v2.11.2
+   Compiling tauri-plugin-fs v2.5.1
+   Compiling tauri-macros v2.6.2
+   Compiling tauri-plugin-dialog v2.7.1
+   Compiling m6809-emu v0.1.0 (C:\Users\andre\Desktop\6809Emu\src-tauri)
+    Building [======================>  ] 357/372: tauri...    Building [=======================> ] 358/372: tauri...    Building [=======================> ] 359/372: tauri...    Building [=======================> ] 360/372: tauri...    Building [=======================> ] 361/372: tauri...    Building [=======================> ] 362/372: tauri...    Building [=======================> ] 363/372: tauri...    Building [=======================> ] 364/372: tauri...    Building [=======================> ] 365/372: tauri...    Building [=======================> ] 366/372: m6809...    Building [=======================> ] 367/372: tauri       Building [=======================> ] 367/372: tauri...    Building [=======================> ] 368/372: tauri...    Building [=======================> ] 369/372: tauri...    Building [=======================> ] 370/372: m6809...    Building [=======================> ] 371/372: m6809...                                                                Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.57s
+     Running `C:\Users\andre\Desktop\6809Emu\target\debug\m6809-emu.exe`
+        Info File crates\m6809-asm\src\lib.rs changed. Rebuilding application...
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+warning: type `Reg8` is more private than the item `Cpu::set_reg8`
+   --> crates\m6809-core\src\cpu.rs:136:5
+    |
+136 |     pub fn set_reg8(&mut self, reg: Reg8, value: u8) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::set_reg8` is reachable at visibility `pub`
+    |
+note: but type `Reg8` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:34:1
+    |
+34  | enum Reg8 {
+    | ^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `Reg8` is more private than the item `Cpu::get_reg8`
+   --> crates\m6809-core\src\cpu.rs:144:5
+    |
+144 |     pub fn get_reg8(&self, reg: Reg8) -> u8 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::get_reg8` is reachable at visibility `pub`
+    |
+note: but type `Reg8` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:34:1
+    |
+34  | enum Reg8 {
+    | ^^^^^^^^^
+
+warning: type `Reg16` is more private than the item `Cpu::set_reg16`
+   --> crates\m6809-core\src\cpu.rs:152:5
+    |
+152 |     pub fn set_reg16(&mut self, reg: Reg16, value: u16) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::set_reg16` is reachable at visibility `pub`
+    |
+note: but type `Reg16` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:41:1
+    |
+41  | enum Reg16 {
+    | ^^^^^^^^^^
+
+warning: type `Reg16` is more private than the item `Cpu::get_reg16`
+   --> crates\m6809-core\src\cpu.rs:166:5
+    |
+166 |     pub fn get_reg16(&self, reg: Reg16) -> u16 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `Cpu::get_reg16` is reachable at visibility `pub`
+    |
+note: but type `Reg16` is only usable at visibility `pub(self)`
+   --> crates\m6809-core\src\cpu.rs:41:1
+    |
+41  | enum Reg16 {
+    | ^^^^^^^^^^
+
+warning: variant `Dp` is never constructed
+  --> crates\m6809-core\src\cpu.rs:37:5
+   |
+34 | enum Reg8 {
+   |      ---- variant in this enum
+...
+37 |     Dp,
+   |     ^^
+   |
+   = note: `Reg8` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: variant `Pc` is never constructed
+  --> crates\m6809-core\src\cpu.rs:47:5
+   |
+41 | enum Reg16 {
+   |      ----- variant in this enum
+...
+47 |     Pc,
+   |     ^^
+   |
+   = note: `Reg16` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: methods `branch_if` and `set_logical8` are never used
+   --> crates\m6809-core\src\cpu.rs:304:8
+    |
+58  | impl Cpu {
+    | -------- methods in this implementation
+...
+304 |     fn branch_if(&self, condition: bool) -> bool {
+    |        ^^^^^^^^^
+...
+427 |     fn set_logical8(&mut self, result: u8) {
+    |        ^^^^^^^^^^^^
+
+warning: `m6809-core` (lib) generated 7 warnings
+   Compiling m6809-asm v0.1.0 (C:\Users\andre\Desktop\6809Emu\crates\m6809-asm)
+    Building [=======================> ] 369/372: m6809...                                                            warning: trait `MnemonicCheck` is never used
+   --> crates\m6809-asm\src\lib.rs:719:7
+    |
+719 | trait MnemonicCheck {
+    |       ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+    Building [=======================> ] 369/372: m6809...                                                            warning: `m6809-asm` (lib) generated 1 warning
+   Compiling m6809-emu v0.1.0 (C:\Users\andre\Desktop\6809Emu\src-tauri)
+    Building [=======================> ] 370/372: m6809...    Building [=======================> ] 371/372: m6809...                                                                Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.41s
+     Running `C:\Users\andre\Desktop\6809Emu\target\debug\m6809-emu.exe`
+error: process didn't exit successfully: `C:\Users\andre\Desktop\6809Emu\target\debug\m6809-emu.exe` (exit code: 0xcfffffff)

@@ -1,0 +1,310 @@
+:root,
+[data-theme="dark"] {
+  --bg-deep: #080c10;
+  --bg-panel: #0f1419;
+  --bg-elevated: #161d26;
+  --border: #243040;
+  --border-glow: #2d5a3d;
+  --text: #c8d6e5;
+  --text-dim: #6b7d8f;
+  --accent: #39ff14;
+  --accent-dim: #1a8f0f;
+  --accent-amber: #ffb000;
+  --danger: #ff4757;
+  --flag-on: #39ff14;
+  --flag-off: #2a3540;
+  --pc-highlight: rgba(57, 255, 20, 0.12);
+  --pc-border: #39ff14;
+  --grid-color: rgba(57, 255, 20, 0.02);
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+  --font-ui: "Space Grotesk", system-ui, sans-serif;
+  --radius: 8px;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --motion-instant: 0s;
+  --motion-fast: 100ms;
+  --motion-normal: 150ms;
+  --motion-slow: 250ms;
+  --ease-tactile: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+[data-theme="light"] {
+  --bg-deep: #eef2f6;
+  --bg-panel: #ffffff;
+  --bg-elevated: #f4f7fa;
+  --border: #c5d0dc;
+  --border-glow: #8fbc8f;
+  --text: #1a2330;
+  --text-dim: #5a6b7d;
+  --accent: #1a8f0f;
+  --accent-dim: #157a0d;
+  --accent-amber: #c47f00;
+  --danger: #d63040;
+  --flag-on: #1a8f0f;
+  --flag-off: #d8e0e8;
+  --pc-highlight: rgba(26, 143, 15, 0.1);
+  --pc-border: #1a8f0f;
+  --grid-color: rgba(26, 143, 15, 0.04);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="high-contrast"] {
+  --bg-deep: #000000;
+  --bg-panel: #0a0a0a;
+  --bg-elevated: #141414;
+  --border: #ffffff;
+  --border-glow: #00ff00;
+  --text: #ffffff;
+  --text-dim: #cccccc;
+  --accent: #00ff00;
+  --accent-dim: #00cc00;
+  --accent-amber: #ffff00;
+  --danger: #ff4444;
+  --flag-on: #00ff00;
+  --flag-off: #333333;
+  --pc-highlight: rgba(0, 255, 0, 0.2);
+  --pc-border: #00ff00;
+  --grid-color: rgba(255, 255, 255, 0.03);
+  --shadow: 0 0 0 1px #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  scrollbar-color: var(--border) var(--bg-deep);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-deep);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* Responsive type scales down on narrow viewports */
+body {
+  font-size: clamp(12px, 1.4vw + 8px, 14px);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+button {
+  font-family: var(--font-ui);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    transform var(--motion-fast) var(--ease-tactile),
+    border-color var(--motion-normal) ease,
+    background var(--motion-normal) ease,
+    box-shadow var(--motion-normal) ease,
+    opacity var(--motion-fast) ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent-dim);
+  background: var(--bg-panel);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button:focus-visible {
+  outline: none;
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+button.primary {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, var(--bg-elevated)), var(--bg-elevated));
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+button.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+button.danger {
+  border-color: #5a2020;
+  color: var(--danger);
+}
+
+input,
+textarea,
+select {
+  font-family: var(--font-mono);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow);
+}
+
+/* Primary panels — core debug surfaces (disasm, registers, memory, trace)
+   Marked with a subtle accent-tinged top border for hierarchy */
+.panel-primary {
+  border-top: 2px solid var(--accent-dim);
+}
+
+/* Secondary panels — supporting tools (breakpoints, watchpoints, terminal, IO)
+   Header recedes into the body to visually prioritize primary surfaces */
+.panel-secondary .panel-header {
+  background: var(--bg-panel);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Touch-friendly sizing on coarse pointer devices */
+@media (pointer: coarse) {
+  button {
+    min-height: 36px;
+  }
+
+  .panel .bp,
+  .panel .flag,
+  .panel .cell {
+    min-height: 32px;
+  }
+}
+
+/* Hide elements below 700px viewport width */
+@media (max-width: 700px) {
+  .narrow-hide {
+    display: none !important;
+  }
+
+  /* Condensed toolbar: reduce gaps and padding */
+  .toolbar-narrow .controls {
+    gap: 4px;
+  }
+
+  .toolbar-narrow .status-bar {
+    gap: 8px;
+    font-size: 10px;
+  }
+
+  .toolbar-narrow .brand .title {
+    display: none;
+  }
+}
+
+/* Safe area for narrow viewports with rounded corners or notches */
+@media (max-width: 480px) {
+  .app {
+    padding: 6px !important;
+    gap: 6px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  button:active:not(:disabled) {
+    transform: none;
+  }
+}
