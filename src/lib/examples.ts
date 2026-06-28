@@ -101,9 +101,9 @@ loop    BRA  loop
     labelKey: "examples.aciaecho",
     source: `        ORG $0100
         ANDCC #$EF
-        LDA  #$C2
-        STA  $FFA1
         LDA  #$03
+        STA  $FFA1
+        LDA  #$42
         STA  $FFA1
 idle    BRA  idle
         ORG $0200
