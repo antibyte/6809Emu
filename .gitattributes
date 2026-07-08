@@ -1,0 +1,31 @@
+# 6809Emu - line ending and file type normalization
+# Helps avoid CRLF noise on Windows while keeping repo clean (LF).
+
+* text=auto
+
+# Source (force LF in repository)
+*.rs text eol=lf
+*.ts text eol=lf
+*.js text eol=lf
+*.svelte text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+
+# Binaries and assets that must stay as-is
+*.bin binary
+*.png binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.exe binary
+*.dll binary
+
+# Generated / lock files
+Cargo.lock text eol=lf
+package-lock.json text eol=lf

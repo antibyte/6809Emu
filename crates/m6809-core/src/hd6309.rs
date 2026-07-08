@@ -1034,9 +1034,23 @@ impl Cpu {
     }
 
     pub(crate) fn run_tfm_chunk_step(&mut self, mem: &mut Memory) -> StepResult {
-        let pc_before = self.tfm_pending.as_ref().expect("tfm_pending").pc_before;
-        let bytes = self.tfm_pending.as_ref().expect("tfm_pending").bytes.clone();
-        let opcode = bytes.first().copied().unwrap_or(0x11);
+        // Safely extract info; if no pending (inconsistent state), return a safe no-op result
+        let (pc_before, bytes, opcode) = match &self.tfm_pending {
+            Some(t) => (t.pc_before, t.bytes.clone(), t.bytes.first().copied().unwrap_or(0x11)),
+            None => {
+                self.tfm_pending = None;
+                return StepResult {
+                    cycles: 0,
+                    pc_before: self.pc,
+                    pc_after: self.pc,
+                    opcode: 0,
+                    bytes: vec![],
+                    mnemonic: String::new(),
+                    operands: String::new(),
+                    trap: None,
+                };
+            }
+        };
 
         mem.clear_watchpoint_trigger();
         let mut ctx = StepCtx {
@@ -1068,61 +1082,61 @@ impl Cpu {
     }
 
     fn run_tfm_chunk(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
-        let chunk = {
-            let tfm = self.tfm_pending.as_mut().expect("tfm_pending");
-            tfm.remaining.min(TFM_CHUNK_SIZE)
+        // Take pending out to mutate locally without repeated expects.
+        // This makes the code panic-free even if called in unexpected state.
+        let mut pending = match self.tfm_pending.take() {
+            Some(p) => p,
+            None => {
+                ctx.cycles = 0;
+                return;
+            }
         };
 
+        let chunk = pending.remaining.min(TFM_CHUNK_SIZE);
+
         for _ in 0..chunk {
-            let tfm = self.tfm_pending.as_mut().expect("tfm_pending");
-            let byte = mem.read8(tfm.src);
-            mem.write8(tfm.dst, byte);
-            match tfm.opcode {
+            let byte = mem.read8(pending.src);
+            mem.write8(pending.dst, byte);
+            match pending.opcode {
                 0x38 => {
-                    tfm.src = tfm.src.wrapping_add(1);
-                    tfm.dst = tfm.dst.wrapping_add(1);
+                    pending.src = pending.src.wrapping_add(1);
+                    pending.dst = pending.dst.wrapping_add(1);
                 }
                 0x39 => {
-                    tfm.src = tfm.src.wrapping_sub(1);
-                    tfm.dst = tfm.dst.wrapping_sub(1);
+                    pending.src = pending.src.wrapping_sub(1);
+                    pending.dst = pending.dst.wrapping_sub(1);
                 }
                 0x3A => {
-                    tfm.src = tfm.src.wrapping_add(1);
+                    pending.src = pending.src.wrapping_add(1);
                 }
                 0x3B => {
-                    tfm.dst = tfm.dst.wrapping_add(1);
+                    pending.dst = pending.dst.wrapping_add(1);
                 }
                 _ => {}
             }
-            tfm.remaining -= 1;
+            pending.remaining -= 1;
         }
 
-        let (opcode, postbyte, first_chunk, done) = {
-            let tfm = self.tfm_pending.as_mut().expect("tfm_pending");
-            self.w = tfm.remaining;
-            let first = tfm.first_chunk;
-            tfm.first_chunk = false;
-            (
-                tfm.opcode,
-                tfm.postbyte,
-                first,
-                tfm.remaining == 0,
-            )
-        };
+        self.w = pending.remaining;
+        let first_chunk = pending.first_chunk;
+        pending.first_chunk = false;
 
         ctx.cycles = if first_chunk {
             6 + chunk as u32 * 3
         } else {
             chunk as u32 * 3
         };
-        ctx.mnemonic = tfm_mnemonic(opcode).into();
-        ctx.operands = format!("${postbyte:02X}");
+        ctx.mnemonic = tfm_mnemonic(pending.opcode).into();
+        ctx.operands = format!("${:02X}", pending.postbyte);
 
-        if done {
-            let tfm = self.tfm_pending.take().expect("tfm_pending");
-            self.set_hd6309_reg16(tfm.src_code & 0x07, tfm.src);
-            self.set_hd6309_reg16(tfm.dst_code & 0x07, tfm.dst);
+        if pending.remaining == 0 {
+            // done: apply final registers, do not put back
+            self.set_hd6309_reg16(pending.src_code & 0x07, pending.src);
+            self.set_hd6309_reg16(pending.dst_code & 0x07, pending.dst);
             self.w = 0;
+            // tfm_pending stays None
+        } else {
+            self.tfm_pending = Some(pending);
         }
     }
 
