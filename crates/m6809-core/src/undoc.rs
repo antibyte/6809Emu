@@ -208,6 +208,7 @@ impl Cpu {
         ctx.mnemonic = "XRES".into();
         let saved_i = self.cc.contains(Flags::I);
         let saved_f = self.cc.contains(Flags::F);
+        let target = mem.read16(0xFFFE);
         self.push_interrupt_frame(mem, true);
         if !saved_i {
             self.cc.remove(Flags::I);
@@ -215,7 +216,7 @@ impl Cpu {
         if !saved_f {
             self.cc.remove(Flags::F);
         }
-        self.pc = mem.read16(0xFFFE);
+        self.pc = target;
     }
 
     pub(crate) fn exec_xswi2(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
@@ -223,6 +224,7 @@ impl Cpu {
         ctx.mnemonic = "XSWI2".into();
         let saved_i = self.cc.contains(Flags::I);
         let saved_f = self.cc.contains(Flags::F);
+        let target = mem.read16(0xFFF4);
         self.push_interrupt_frame(mem, true);
         if !saved_i {
             self.cc.remove(Flags::I);
@@ -230,7 +232,7 @@ impl Cpu {
         if !saved_f {
             self.cc.remove(Flags::F);
         }
-        self.pc = mem.read16(0xFFF4);
+        self.pc = target;
     }
 
     pub(crate) fn exec_xfirq(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
@@ -238,6 +240,7 @@ impl Cpu {
         ctx.mnemonic = "XFIRQ".into();
         let saved_i = self.cc.contains(Flags::I);
         let saved_f = self.cc.contains(Flags::F);
+        let target = mem.read16(0xFFF6);
         self.push_interrupt_frame(mem, true);
         if !saved_i {
             self.cc.remove(Flags::I);
@@ -245,7 +248,7 @@ impl Cpu {
         if !saved_f {
             self.cc.remove(Flags::F);
         }
-        self.pc = mem.read16(0xFFF6);
+        self.pc = target;
     }
 
     pub(crate) fn op_xnc8(&mut self, value: u8) -> u8 {

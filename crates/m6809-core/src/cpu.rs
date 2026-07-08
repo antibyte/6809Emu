@@ -541,8 +541,9 @@ impl Cpu {
 
     pub(crate) fn enter_hw_trap(&mut self, mem: &mut Memory, error_bit: u8) {
         self.mode_reg |= error_bit;
+        let target = mem.read16(0xFFF0);
         self.push_interrupt_frame(mem, true);
-        self.pc = mem.read16(0xFFF0);
+        self.pc = target;
         self.total_cycles += 19;
     }
 
@@ -554,8 +555,10 @@ impl Cpu {
         name: &str,
     ) -> StepResult {
         let pc_before = self.pc;
+        // Read vector before pushing — a low S can overwrite vector addresses during push.
+        let target = mem.read16(vector);
         self.push_interrupt_frame(mem, save_all);
-        self.pc = mem.read16(vector);
+        self.pc = target;
         self.total_cycles += 19;
         StepResult {
             cycles: 19,
@@ -587,8 +590,9 @@ impl Cpu {
     fn exec_swi(&mut self, mem: &mut Memory, ctx: &mut StepCtx, vector: u16, name: &str) {
         ctx.cycles = 19;
         ctx.mnemonic = name.into();
+        let target = mem.read16(vector);
         self.push_interrupt_frame(mem, true);
-        self.pc = mem.read16(vector);
+        self.pc = target;
         ctx.trap = Some(Trap::Swi);
     }
 
@@ -632,17 +636,18 @@ impl Cpu {
         ctx.mnemonic = "CWAI".into();
         ctx.operands = format!("#${mask:02X}");
         self.cc = Flags::from_bits_retain(self.cc.bits() & mask);
-        self.push_interrupt_frame(mem, true);
-        self.cwai_waiting = true;
         if let Some(vector) = self.serviceable_interrupt_vector() {
+            let target = mem.read16(vector);
+            self.push_interrupt_frame(mem, true);
             self.clear_pending_for_vector(vector);
             self.cc.insert(Flags::I);
             if vector != 0xFFF8 {
                 self.cc.insert(Flags::F);
             }
-            self.pc = mem.read16(vector);
-            self.cwai_waiting = false;
+            self.pc = target;
         } else {
+            self.push_interrupt_frame(mem, true);
+            self.cwai_waiting = true;
             self.halted = true;
             ctx.trap = Some(Trap::Halted);
         }
@@ -773,14 +778,14 @@ impl Cpu {
         result
     }
 
-    fn op_inc8(&mut self, value: u8) -> u8 {
+    pub(crate) fn op_inc8(&mut self, value: u8) -> u8 {
         let result = value.wrapping_add(1);
         self.cc.set(Flags::V, value == 0x7F);
         self.cc.set_nz8(result);
         result
     }
 
-    fn op_dec8(&mut self, value: u8) -> u8 {
+    pub(crate) fn op_dec8(&mut self, value: u8) -> u8 {
         let result = value.wrapping_sub(1);
         self.cc.set(Flags::V, value == 0x80);
         self.cc.set_nz8(result);
@@ -2035,8 +2040,12 @@ impl Cpu {
         let postbyte = self.fetch_imm8(mem, ctx);
         let src_code = postbyte >> 4;
         let dst_code = postbyte & 0x0F;
-        self.transfer_reg(src_code, dst_code, false);
-        ctx.cycles = 6;
+        let value = self.read_tfr_reg(src_code);
+        self.write_tfr_reg(dst_code, value);
+        if dst_code == 4 {
+            self.lds_encountered = true;
+        }
+        ctx.cycles = if self.is_hd6309() { 5 } else { 6 };
         ctx.mnemonic = "TFR".into();
         ctx.operands = format!(
             "{},{}",
@@ -2049,8 +2058,20 @@ impl Cpu {
         let postbyte = self.fetch_imm8(mem, ctx);
         let src_code = postbyte >> 4;
         let dst_code = postbyte & 0x0F;
-        self.transfer_reg(src_code, dst_code, true);
-        ctx.cycles = 8;
+        let (reg1, reg2) = if postbyte & 0x80 != 0 {
+            (
+                self.read_tfr_reg(src_code),
+                self.read_tfr_reg(dst_code),
+            )
+        } else {
+            (
+                self.read_exg_reg_8first(src_code),
+                self.read_exg_reg_8first(dst_code),
+            )
+        };
+        self.write_tfr_reg(dst_code, reg1);
+        self.write_tfr_reg(src_code, reg2);
+        ctx.cycles = if self.is_hd6309() { 7 } else { 8 };
         ctx.mnemonic = "EXG".into();
         ctx.operands = format!(
             "{},{}",
@@ -2059,95 +2080,23 @@ impl Cpu {
         );
     }
 
-    fn tfr_fill16_from8(byte: u8) -> u16 {
-        0xFF00 | u16::from(byte)
+    fn dup8(byte: u8) -> u16 {
+        u16::from(byte) << 8 | u16::from(byte)
     }
 
-    fn transfer_reg_mixed(&mut self, src_code: u8, dst_code: u8, exchange: bool) {
-        let src_8bit = src_code >= 8;
-        if exchange {
-            if src_8bit {
-                let src_val = self.get_tfr_reg8(src_code);
-                let dst_val = self.get_tfr_reg16(dst_code);
-                self.set_tfr_reg16(dst_code, Self::tfr_fill16_from8(src_val));
-                self.set_tfr_reg8(src_code, (dst_val & 0xFF) as u8);
-            } else {
-                let src_val = self.get_tfr_reg16(src_code);
-                let dst_val = self.get_tfr_reg8(dst_code);
-                self.set_tfr_reg8(dst_code, (src_val & 0xFF) as u8);
-                self.set_tfr_reg16(src_code, Self::tfr_fill16_from8(dst_val));
-            }
-        } else if dst_code >= 8 {
-            let src_val = if src_8bit {
-                u16::from(self.get_tfr_reg8(src_code))
-            } else {
-                self.get_tfr_reg16(src_code)
-            };
-            self.set_tfr_reg8(dst_code, (src_val & 0xFF) as u8);
-        } else {
-            let src_byte = if src_8bit {
-                self.get_tfr_reg8(src_code)
-            } else {
-                (self.get_tfr_reg16(src_code) & 0xFF) as u8
-            };
-            self.set_tfr_reg16(dst_code, Self::tfr_fill16_from8(src_byte));
-        }
-    }
-
-    fn transfer_reg(&mut self, src_code: u8, dst_code: u8, exchange: bool) {
-        // 4-bit register codes: 0-5 = 16-bit (D,X,Y,U,S,PC), 8-B = 8-bit (A,B,CC,DP)
-        // 6-7, C-F reserved on 6809; 6=W, 7=V, E=E, F=F on HD6309.
-        // Mixed 8/16 transfers on MC6809: partial fill from source, high bits set to 1.
-        let src_8bit = src_code >= 8;
-        let dst_8bit = dst_code >= 8;
-        if src_8bit != dst_8bit {
-            self.transfer_reg_mixed(src_code, dst_code, exchange);
-            return;
-        }
-        if src_8bit {
-            let src_val = self.get_tfr_reg8(src_code);
-            if exchange {
-                let dst_val = self.get_tfr_reg8(dst_code);
-                self.set_tfr_reg8(src_code, dst_val);
-            }
-            self.set_tfr_reg8(dst_code, src_val);
-        } else {
-            let src_val = self.get_tfr_reg16(src_code);
-            if exchange {
-                let dst_val = self.get_tfr_reg16(dst_code);
-                self.set_tfr_reg16(src_code, dst_val);
-            }
-            self.set_tfr_reg16(dst_code, src_val);
-        }
-    }
-
-    fn get_tfr_reg8(&self, code: u8) -> u8 {
-        match code {
-            0x8 => self.a,
-            0x9 => self.b,
-            0xA => self.cc.bits(),
-            0xB => self.dp,
-            0xE if self.is_hd6309() => (self.w >> 8) as u8, // E register (high byte of W)
-            0xF if self.is_hd6309() => (self.w & 0xFF) as u8, // F register (low byte of W)
-            _ => 0xFF, // undefined → $FF
-        }
-    }
-
-    fn set_tfr_reg8(&mut self, code: u8, value: u8) {
-        match code {
-            0x8 => self.a = value,
-            0x9 => self.b = value,
-            0xA => self.cc = Flags::from_byte(value),
-            0xB => self.dp = value,
-            0xE if self.is_hd6309() => self.w = (self.w & 0x00FF) | ((value as u16) << 8),
-            0xF if self.is_hd6309() => self.w = (self.w & 0xFF00) | value as u16,
-            _ => {}
-        }
-    }
-
-    fn get_tfr_reg16(&self, code: u8) -> u16 {
+    fn read_tfr_reg(&self, code: u8) -> u16 {
         if self.is_hd6309() {
-            return self.get_hd6309_reg16(code);
+            return match code {
+                0x0..=0x7 => self.get_hd6309_reg16(code),
+                0x8 => Self::dup8(self.a),
+                0x9 => Self::dup8(self.b),
+                0xA => Self::dup8(self.cc.bits()),
+                0xB => Self::dup8(self.dp),
+                0xC | 0xD => 0,
+                0xE => Self::dup8((self.w >> 8) as u8),
+                0xF => Self::dup8(self.w as u8),
+                _ => 0,
+            };
         }
         match code {
             0x0 => self.get_reg16(Reg16::D),
@@ -2156,13 +2105,56 @@ impl Cpu {
             0x3 => self.u,
             0x4 => self.s,
             0x5 => self.pc,
-            _ => 0xFFFF, // undefined → $FFFF
+            0x8 => 0xFF00 | u16::from(self.a),
+            0x9 => 0xFF00 | u16::from(self.b),
+            0xA => Self::dup8(self.cc.bits()),
+            0xB => Self::dup8(self.dp),
+            _ => 0xFFFF,
         }
     }
 
-    fn set_tfr_reg16(&mut self, code: u8, value: u16) {
+    fn read_exg_reg_8first(&self, code: u8) -> u16 {
         if self.is_hd6309() {
-            self.set_hd6309_reg16(code, value);
+            return match code {
+                0x0..=0x7 => self.get_hd6309_reg16(code),
+                0x8 => 0xFF00 | u16::from(self.a),
+                0x9 => 0xFF00 | u16::from(self.b),
+                0xA => 0xFF00 | u16::from(self.cc.bits()),
+                0xB => 0xFF00 | u16::from(self.dp),
+                0xC | 0xD => 0,
+                0xE => 0xFF00 | u16::from((self.w >> 8) as u8),
+                0xF => 0xFF00 | u16::from(self.w as u8),
+                _ => 0xFFFF,
+            };
+        }
+        match code {
+            0x0 => self.get_reg16(Reg16::D),
+            0x1 => self.x,
+            0x2 => self.y,
+            0x3 => self.u,
+            0x4 => self.s,
+            0x5 => self.pc,
+            0x8 => 0xFF00 | u16::from(self.a),
+            0x9 => 0xFF00 | u16::from(self.b),
+            0xA => 0xFF00 | u16::from(self.cc.bits()),
+            0xB => 0xFF00 | u16::from(self.dp),
+            _ => 0xFFFF,
+        }
+    }
+
+    fn write_tfr_reg(&mut self, code: u8, value: u16) {
+        if self.is_hd6309() {
+            match code {
+                0x0..=0x7 => self.set_hd6309_reg16(code, value),
+                0x8 => self.a = (value >> 8) as u8,
+                0x9 => self.b = value as u8,
+                0xA => self.cc = Flags::from_byte(value as u8),
+                0xB => self.dp = (value >> 8) as u8,
+                0xC | 0xD => {}
+                0xE => self.w = (self.w & 0x00FF) | ((value >> 8) << 8),
+                0xF => self.w = (self.w & 0xFF00) | value,
+                _ => {}
+            }
             return;
         }
         match code {
@@ -2172,6 +2164,10 @@ impl Cpu {
             0x3 => self.u = value,
             0x4 => self.s = value,
             0x5 => self.pc = value,
+            0x8 => self.a = value as u8,
+            0x9 => self.b = value as u8,
+            0xA => self.cc = Flags::from_byte(value as u8),
+            0xB => self.dp = value as u8,
             _ => {}
         }
     }

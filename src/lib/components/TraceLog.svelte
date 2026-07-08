@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { TraceEntry } from "../types";
   import { t } from "../i18n";
+  import Icon from "./Icon.svelte";
 
   let {
     entries,
@@ -8,25 +9,37 @@
     onMaxDisplayChange,
     onClear,
     onNavigate,
+    onClose,
   }: {
     entries: TraceEntry[];
     maxDisplay: number;
     onMaxDisplayChange: (value: number) => void;
     onClear: () => void;
     onNavigate: (addr: number) => void;
+    onClose?: () => void;
   } = $props();
 
   function fmtAddr(a: number) {
     return `$${a.toString(16).toUpperCase().padStart(4, "0")}`;
   }
+
+  // Newest first; show delta cycles vs the previous (older) entry.
+  const reversed = $derived([...entries].reverse());
+  const rows = $derived(
+    reversed.map((entry, i) => {
+      const older = reversed[i + 1];
+      const delta = older != null ? entry.cycles - older.cycles : null;
+      return { entry, delta, isNew: i === 0 };
+    }),
+  );
 </script>
 
 <div class="panel trace-panel panel-primary">
   <div class="panel-header">
-    <span>{$t("trace.title")}</span>
+    <span class="ph-title"><span class="accent-dot"></span>{$t("trace.title")}</span>
     <div class="header-controls">
       <label class="depth-label">
-        {$t("trace.depth")}:
+        {$t("trace.depth")}
         <select
           value={maxDisplay}
           onchange={(e) => onMaxDisplayChange(parseInt((e.target as HTMLSelectElement).value, 10))}
@@ -37,23 +50,39 @@
           <option value={200}>200</option>
         </select>
       </label>
-      <button onclick={onClear}>{$t("trace.clear")}</button>
+      <button class="ghost icon-btn" onclick={onClear} title={$t("trace.clear")} aria-label={$t("trace.clear")}>
+        <Icon name="reset" size={12} />
+      </button>
+      {#if onClose}
+        <button class="hdr-btn" onclick={onClose} title={$t("panels.close")} aria-label={$t("panels.close")}>
+          <Icon name="close" size={13} />
+        </button>
+      {/if}
     </div>
   </div>
   <div class="panel-body trace-list">
-    {#if entries.length === 0}
-      <div class="empty">{$t("trace.empty")}</div>
+    {#if rows.length === 0}
+      <div class="empty-line"><Icon name="trace" size={12} /> {$t("trace.empty")}</div>
     {:else}
-      {#each [...entries].reverse() as entry}
-        <button class="trace-entry" onclick={() => onNavigate(entry.pc_before)}>
-          <span class="pc mono">{fmtAddr(entry.pc_before)}</span>
+      <div class="row header">
+        <span class="pc-h">{$t("status.pc")}</span>
+        <span class="insn-h">{$t("disasm.title")}</span>
+        <span class="cyc-h" title={$t("trace.cycles")}>±{$t("trace.cycles")}</span>
+      </div>
+      {#each rows as row (row.entry.id)}
+        <button class="trace-entry" class:new={row.isNew} onclick={() => onNavigate(row.entry.pc_before)}>
+          <span class="pc mono">{fmtAddr(row.entry.pc_before)}</span>
           <span class="insn mono">
-            {entry.mnemonic}
-            {#if entry.operands}
-              {entry.operands}
+            <span class="m">{row.entry.mnemonic}</span>
+            {#if row.entry.operands}<span class="op"> {row.entry.operands}</span>{/if}
+          </span>
+          <span class="cycles mono" title={row.entry.cycles + "c"}>
+            {#if row.delta != null}
+              <span class="delta">+{row.delta}</span>
+            {:else}
+              <span class="delta dim">—</span>
             {/if}
           </span>
-          <span class="cycles">{entry.cycles}c</span>
         </button>
       {/each}
     {/if}
@@ -69,7 +98,7 @@
   .header-controls {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     text-transform: none;
     letter-spacing: 0;
   }
@@ -86,7 +115,7 @@
   .depth-label select {
     padding: 2px 4px;
     font-size: 10px;
-    background: var(--bg-deep);
+    background: var(--bg-0);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: 4px;
@@ -99,19 +128,28 @@
     min-height: 0;
   }
 
-  .empty {
-    padding: 16px;
-    color: var(--text-dim);
-    text-align: center;
-    font-size: 12px;
+  .row.header {
+    display: grid;
+    grid-template-columns: 54px 1fr 52px;
+    gap: 8px;
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+  }
+
+  .cyc-h {
+    text-align: right;
   }
 
   .trace-entry {
     display: grid;
-    grid-template-columns: 64px 1fr 40px;
+    grid-template-columns: 54px 1fr 52px;
     gap: 8px;
-    padding: 3px 12px;
-    border-bottom: 1px solid rgba(36, 48, 64, 0.5);
+    padding: 2px 12px;
+    border-bottom: 1px solid var(--border);
     width: 100%;
     background: none;
     border-left: none;
@@ -120,10 +158,20 @@
     border-radius: 0;
     text-align: left;
     cursor: pointer;
+    min-height: var(--row-h);
+    align-items: center;
   }
 
   .trace-entry:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-hover);
+  }
+
+  .trace-entry.new {
+    background: var(--accent-soft);
+  }
+
+  .trace-entry.new .pc {
+    color: var(--accent);
   }
 
   .pc {
@@ -132,11 +180,32 @@
 
   .insn {
     color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .insn .m {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .insn .op {
+    color: var(--text-dim);
   }
 
   .cycles {
-    color: var(--accent-amber);
     text-align: right;
-    opacity: 0.7;
+    color: var(--amber);
+    font-size: 10.5px;
+  }
+
+  .delta {
+    color: var(--text-faint);
+    font-size: 10px;
+  }
+
+  .delta.dim {
+    opacity: 0.5;
   }
 </style>

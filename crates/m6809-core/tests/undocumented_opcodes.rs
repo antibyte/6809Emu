@@ -227,6 +227,36 @@ fn tfr_b_to_y_fills_high_byte_with_ones() {
 }
 
 #[test]
+fn tfr_cc_to_y_duplicates_cc_byte() {
+    let mut emu = run_mc6809(&[0x1F, 0xA2]);
+    emu.cpu.cc = Flags::from_bits_truncate(0x50);
+    emu.cpu.y = 0;
+    emu.step();
+    assert_eq!(emu.cpu.y, 0x5050);
+}
+
+#[test]
+fn tfr_dp_to_y_duplicates_dp_byte() {
+    let mut emu = run_mc6809(&[0x1F, 0xB2]);
+    emu.cpu.dp = 0x42;
+    emu.cpu.y = 0;
+    emu.step();
+    assert_eq!(emu.cpu.y, 0x4242);
+}
+
+#[test]
+fn tfr_to_s_enables_nmi() {
+    let mut emu = run_mc6809(&[0x1F, 0x14]);
+    emu.memory.write16(0xFFFC, 0x0300);
+    emu.step();
+    assert!(emu.cpu.lds_encountered);
+    emu.trigger_nmi();
+    let step = emu.step();
+    assert_eq!(step.mnemonic, "NMI");
+    assert_eq!(emu.cpu.pc, 0x0300);
+}
+
+#[test]
 fn tfr_undefined_reg7_to_y_is_ffff() {
     let mut emu = run_mc6809(&[0x1F, 0x72]);
     emu.cpu.y = 0x0000;

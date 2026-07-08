@@ -74,11 +74,50 @@
       onClose();
     }
   }
+
+  let modalEl: HTMLDivElement | undefined = $state();
+  let lastFocused: HTMLElement | null = null;
+
+  $effect(() => {
+    if (open) {
+      lastFocused = document.activeElement as HTMLElement | null;
+      const t = window.setTimeout(() => modalEl?.focus(), 0);
+      return () => {
+        window.clearTimeout(t);
+        lastFocused?.focus?.();
+      };
+    }
+  });
+
+  function onModalKeydown(event: KeyboardEvent) {
+    if (!open || !modalEl) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key === "Tab") {
+      const focusables = modalEl.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 {#if open}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="backdrop" onclick={onClose} role="presentation">
     <div
       class="modal"
@@ -86,7 +125,9 @@
       aria-modal="true"
       aria-labelledby="video-modal-title"
       tabindex="-1"
+      bind:this={modalEl}
       onclick={(e) => e.stopPropagation()}
+      onkeydown={onModalKeydown}
     >
       <header class="modal-header">
         <div class="title-group">
@@ -131,12 +172,12 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    z-index: 2000;
+    z-index: 4000;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 24px;
-    background: rgba(4, 8, 12, 0.72);
+    background: rgba(4, 8, 12, 0.74);
     backdrop-filter: blur(6px);
     animation: backdropIn var(--motion-normal) ease;
   }
@@ -151,21 +192,23 @@
     max-width: min(96vw, 900px);
     display: flex;
     flex-direction: column;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-glow);
-    border-radius: calc(var(--radius) + 2px);
-    box-shadow:
-      0 24px 64px rgba(0, 0, 0, 0.55),
-      0 0 0 1px rgba(57, 255, 20, 0.08);
+    background: var(--bg-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
     overflow: hidden;
     transform-origin: center;
     animation: modalIn var(--motion-slow) var(--ease-tactile);
   }
 
+  .modal:focus-visible {
+    outline: none;
+  }
+
   @keyframes modalIn {
     from {
       opacity: 0;
-      transform: scale(0.92) translateY(8px);
+      transform: scale(0.94) translateY(8px);
     }
     to {
       opacity: 1;
@@ -178,8 +221,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 12px 16px;
-    background: var(--bg-elevated);
+    padding: 10px 16px;
+    background: var(--bg-2);
     border-bottom: 1px solid var(--border);
   }
 
@@ -192,7 +235,7 @@
 
   .title-group h2 {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -201,18 +244,18 @@
 
   .mode {
     color: var(--accent);
-    font-size: 12px;
+    font-size: 11.5px;
   }
 
   .dims {
-    color: var(--text-dim);
+    color: var(--text-faint);
     font-size: 11px;
   }
 
   .actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-shrink: 0;
   }
 
@@ -227,15 +270,15 @@
   }
 
   .base:hover {
-    background: rgba(57, 255, 20, 0.08);
+    background: var(--accent-soft);
   }
 
   .close-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     background: none;
     border: 1px solid var(--border);
@@ -252,21 +295,23 @@
   }
 
   .modal-body {
+    position: relative;
     display: flex;
     justify-content: center;
-    padding: 14px;
-    background: #060a10;
+    padding: 16px;
+    background: var(--crt-bg);
   }
 
   .empty {
     padding: 32px 24px;
-    color: var(--text-dim);
+    color: var(--text-faint);
     text-align: center;
     font-size: 13px;
   }
 
   .screen {
     --line-ratio: 1.35;
+    position: relative;
     margin: 0;
     font-size: min(
       24px,
@@ -274,15 +319,36 @@
       calc((min(70vh, 520px) - 2.5rem) / var(--rows) / var(--line-ratio))
     );
     line-height: var(--line-ratio);
-    color: #6ee7b7;
-    background: #0a1018;
-    border: 1px solid rgba(57, 255, 20, 0.2);
+    color: var(--crt-phosphor);
+    background: transparent;
+    text-shadow: 0 0 6px var(--crt-glow);
+    border: 1px solid var(--crt-border);
     border-radius: 6px;
     padding: 1.1em 1.25em;
-    box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.35);
     white-space: pre;
     width: calc(var(--cols) * 1ch + 2.5em);
     max-width: calc(100vw - 4rem);
     overflow: hidden;
+  }
+
+  .modal-body::before {
+    content: "";
+    position: absolute;
+    inset: 16px;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--crt-scanline) 0px,
+      var(--crt-scanline) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    mix-blend-mode: multiply;
+    border-radius: 6px;
+    z-index: 1;
+  }
+
+  .screen {
+    z-index: 2;
   }
 </style>

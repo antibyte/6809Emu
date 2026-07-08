@@ -1,15 +1,20 @@
 <script lang="ts">
   import { t } from "../i18n";
+  import Icon from "./Icon.svelte";
   import type { IoRegister, MachineKind } from "../types";
 
   let {
     kind,
     registers,
+    collapsed = false,
+    onToggleCollapse,
     onGoto,
     onWrite,
   }: {
     kind: MachineKind;
     registers: IoRegister[];
+    collapsed?: boolean;
+    onToggleCollapse?: () => void;
     onGoto: (addr: number) => void;
     onWrite: (addr: number, value: number) => void;
   } = $props();
@@ -58,10 +63,17 @@
   );
 </script>
 
-<div class="panel io-panel panel-secondary">
+<div class="panel io-panel panel-secondary" class:collapsed>
   <div class="panel-header">
-    <span>{$t("machine.ioTitle")}</span>
-    <span class="kind">{kindLabel}</span>
+    <span class="ph-title">
+      {$t("machine.ioTitle")}
+      <span class="kind">{kindLabel}</span>
+    </span>
+    {#if onToggleCollapse}
+      <button class="hdr-btn collapse-btn" onclick={onToggleCollapse} title={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-label={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-expanded={!collapsed}>
+        <Icon name="chevron-down" size={13} />
+      </button>
+    {/if}
   </div>
   <div class="panel-body io-list">
     {#if registers.length === 0}
@@ -104,11 +116,33 @@
     height: 100%;
     min-height: 0;
   }
+
+  .io-panel.collapsed .panel-body {
+    display: none;
+  }
+
+  .io-panel .ph-title {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .collapse-btn :global(.icon) {
+    transition: transform var(--motion-normal) var(--ease-tactile);
+    margin-right: 0;
+  }
+
+  .io-panel.collapsed .collapse-btn :global(.icon) {
+    transform: rotate(-90deg);
+  }
+
   .kind {
     font-size: 10px;
-    color: var(--text-dim);
+    color: var(--text-faint);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    font-weight: 500;
   }
 
   .io-list {
@@ -132,11 +166,11 @@
     gap: 6px;
     padding: 4px 10px;
     align-items: center;
-    border-bottom: 1px solid rgba(36, 48, 64, 0.5);
+    border-bottom: 1px solid var(--border);
   }
 
   .io-entry:hover {
-    background: rgba(57, 255, 20, 0.04);
+    background: var(--accent-soft);
   }
 
   .addr {

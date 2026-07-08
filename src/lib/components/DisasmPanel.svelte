@@ -35,7 +35,12 @@
 
   function openMenu(addr: number, e: MouseEvent) {
     e.preventDefault();
-    menu = { x: e.clientX, y: e.clientY, addr };
+    const margin = 8;
+    const w = 180;
+    const h = 120;
+    const x = Math.min(e.clientX, window.innerWidth - w - margin);
+    const y = Math.min(e.clientY, window.innerHeight - h - margin);
+    menu = { x: Math.max(margin, x), y: Math.max(margin, y), addr };
   }
 
   function closeMenu() {
@@ -62,7 +67,9 @@
 <svelte:window onclick={closeMenu} />
 
 <div class="panel disasm-panel panel-primary">
-  <div class="panel-header">{$t("disasm.title")}</div>
+  <div class="panel-header">
+    <span class="ph-title"><span class="accent-dot"></span>{$t("disasm.title")}</span>
+  </div>
   <div class="panel-body lines" bind:this={scrollContainer}>
     {#each lines as line}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -116,48 +123,37 @@
   }
 
   .lines {
-    padding: 0;
+    padding: 4px 0;
   }
 
   .line {
     display: grid;
-    grid-template-columns: 24px 56px minmax(72px, 108px) 1fr;
+    grid-template-columns: 22px 54px minmax(64px, 104px) 1fr;
     gap: 8px;
-    padding: 4px 12px;
+    padding: 1px 12px;
     font-size: 12px;
     align-items: center;
     border-left: 2px solid transparent;
-    transition: background 0.1s;
+    min-height: var(--row-h);
+    transition: background var(--motion-fast) ease;
   }
 
   .line:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--bg-hover);
   }
 
   .line.pc {
     background: var(--pc-highlight);
     border-left-color: var(--pc-border);
-    border-left-width: 2px;
-    position: relative;
-  }
-
-  .line.pc::after {
-    content: "";
-    position: absolute;
-    inset: 2px 0 2px auto;
-    width: 1px;
-    background: linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb, var(--accent) 20%, transparent) 50%,
-      transparent 100%
-    );
-    pointer-events: none;
   }
 
   .line.pc .text {
     color: var(--accent);
-    text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
+    font-weight: 600;
+  }
+
+  .line.pc .addr {
+    color: var(--accent);
   }
 
   .line.has-bp .bp {
@@ -168,10 +164,17 @@
     background: none;
     border: none;
     padding: 0;
-    font-size: 10px;
-    color: var(--text-dim);
+    font-size: 11px;
+    color: var(--text-faint);
     width: 20px;
     height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bp:hover {
+    color: var(--danger);
   }
 
   .bp:focus-visible {
@@ -180,26 +183,33 @@
   }
 
   .addr {
-    color: var(--text-dim);
+    color: var(--text-faint);
   }
 
   .bytes {
-    color: var(--accent-amber);
-    opacity: 0.7;
+    color: var(--amber);
+    opacity: 0.65;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .text {
     color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ctx-menu {
     position: fixed;
-    z-index: 2000;
-    min-width: 160px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
+    z-index: 3000;
+    min-width: 180px;
+    background: var(--bg-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-pop);
     padding: 4px;
     display: flex;
     flex-direction: column;
@@ -211,7 +221,7 @@
   @keyframes ctxIn {
     from {
       opacity: 0;
-      transform: scale(0.92);
+      transform: scale(0.94);
     }
     to {
       opacity: 1;
@@ -230,6 +240,6 @@
   }
 
   .ctx-menu button:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--bg-hover);
   }
 </style>

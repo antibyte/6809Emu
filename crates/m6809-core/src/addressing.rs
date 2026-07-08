@@ -96,11 +96,37 @@ pub enum IndexMode {
     AccF,
     /// W,R (6309 only)
     AccW,
+    /// ,W (6309 only)
+    WBase,
+    /// offset,W (6309 only)
+    WOff16,
+    /// ,W++ (6309 only)
+    WPostInc2,
+    /// ,--W (6309 only)
+    WPreDec2,
 }
 
 /// Whether this mode is indirect.
 fn is_indirect(postbyte: u8) -> bool {
-    (postbyte & 0x90) == 0x90
+    (postbyte & 0x10) != 0 && (postbyte & 0x80) != 0
+}
+
+/// HD6309 W-relative indexed modes (MAME hd6309 INDEXED macro).
+fn decode_hd6309_w_mode(postbyte: u8) -> Option<(IndexMode, u8)> {
+    if postbyte & 0x80 == 0 {
+        return None;
+    }
+    let extra = match postbyte & 0x7f {
+        0x2f | 0x30 => 2,
+        _ => 0,
+    };
+    match postbyte & 0x7f {
+        0x0f | 0x10 => Some((IndexMode::WBase, extra)),
+        0x2f | 0x30 => Some((IndexMode::WOff16, extra)),
+        0x4f | 0x50 => Some((IndexMode::WPostInc2, extra)),
+        0x6f | 0x70 => Some((IndexMode::WPreDec2, extra)),
+        _ => None,
+    }
 }
 
 /// Decode the mode from a postbyte, returning (IndexMode, is_indirect, extra_bytes, reg_bits).
@@ -153,6 +179,9 @@ fn index_extra_cycles(mode: IndexMode, indirect: bool) -> u8 {
         IndexMode::AutoInc2 | IndexMode::AutoDec2 => 3,
         IndexMode::AccA | IndexMode::AccB | IndexMode::AccE | IndexMode::AccF
         | IndexMode::AccW | IndexMode::AccD => 1,
+        IndexMode::WBase => 1,
+        IndexMode::WOff16 => 2,
+        IndexMode::WPostInc2 | IndexMode::WPreDec2 => 2,
         IndexMode::Off8Signed | IndexMode::Pcr8 => 1,
         IndexMode::Off16Signed | IndexMode::Pcr16 => 2,
         IndexMode::IndirectExtended => 2,
@@ -166,7 +195,26 @@ fn index_extra_cycles(mode: IndexMode, indirect: bool) -> u8 {
 
 /// Format an indexed operand for disassembly / trace output.
 pub fn format_index_operand(postbyte: u8, extra: &[u8]) -> String {
-    let (mode, indirect, _, reg_bits) = decode_index_mode(postbyte);
+    let indirect = is_indirect(postbyte);
+    if let Some((w_mode, _)) = decode_hd6309_w_mode(postbyte) {
+        let inner = match w_mode {
+            IndexMode::WBase => ",W".to_string(),
+            IndexMode::WOff16 if extra.len() >= 2 => {
+                let off = i16::from_be_bytes([extra[0], extra[1]]);
+                format!("{off},W")
+            }
+            IndexMode::WPostInc2 => ",W++".to_string(),
+            IndexMode::WPreDec2 => ",--W".to_string(),
+            _ => ",W".to_string(),
+        };
+        return if indirect {
+            format!("[{inner}]")
+        } else {
+            inner
+        };
+    }
+
+    let (mode, _, _, reg_bits) = decode_index_mode(postbyte);
 
     // For PCR modes, the "register" is PCR
     let reg_str: &str = match mode {
@@ -224,7 +272,22 @@ pub fn format_index_operand(postbyte: u8, extra: &[u8]) -> String {
 }
 
 pub fn indexed_addr(cpu: &mut Cpu, mem: &Memory, postbyte: u8) -> EffectiveAddress {
-    let (mode, indirect, extra_bytes, reg_bits) = decode_index_mode(postbyte);
+    let indirect = is_indirect(postbyte);
+    if cpu.variant == CpuVariant::Hd6309 {
+        if let Some((w_mode, extra_bytes)) = decode_hd6309_w_mode(postbyte) {
+            let (final_addr, cycles) =
+                compute_hd6309_w_addr(cpu, mem, w_mode, indirect, extra_bytes);
+            return EffectiveAddress {
+                mode: AddrMode::Indexed,
+                addr: final_addr,
+                extra_cycles: cycles,
+                postbyte: Some(postbyte),
+                index_reg: Some('W'),
+            };
+        }
+    }
+
+    let (mode, _, extra_bytes, reg_bits) = decode_index_mode(postbyte);
 
     // Determine base register (PCR modes compute from PC)
     let (base, index_reg) = match mode {
@@ -275,14 +338,14 @@ fn compute_indexed_addr(
         IndexMode::AutoInc2 => base, // post-increment: EA = R, then R += 2
         IndexMode::AutoDec1 => base.wrapping_sub(1), // pre-decrement: R -= 1, EA = R
         IndexMode::AutoDec2 => base.wrapping_sub(2), // pre-decrement: R -= 2, EA = R
-        IndexMode::AccA => base.wrapping_add(cpu.a as u16),
-        IndexMode::AccB => base.wrapping_add(cpu.b as u16),
+        IndexMode::AccA => base.wrapping_add(cpu.a as i8 as i16 as u16),
+        IndexMode::AccB => base.wrapping_add(cpu.b as i8 as i16 as u16),
         IndexMode::AccD => base.wrapping_add(((cpu.a as u16) << 8) | cpu.b as u16),
         IndexMode::AccE if cpu.variant == CpuVariant::Hd6309 => {
-            base.wrapping_add(cpu.w >> 8)
+            base.wrapping_add((cpu.w >> 8) as i8 as i16 as u16)
         }
         IndexMode::AccF if cpu.variant == CpuVariant::Hd6309 => {
-            base.wrapping_add(cpu.w & 0xFF)
+            base.wrapping_add((cpu.w & 0xFF) as i8 as i16 as u16)
         }
         IndexMode::AccW if cpu.variant == CpuVariant::Hd6309 => base.wrapping_add(cpu.w),
         IndexMode::Off8Signed => {
@@ -307,9 +370,9 @@ fn compute_indexed_addr(
             base.wrapping_add(off as u16)
         }
         IndexMode::IndirectExtended => {
-            let addr = mem.read16(cpu.pc);
+            let ptr_addr = mem.read16(cpu.pc);
             cpu.pc = cpu.pc.wrapping_add(2);
-            addr
+            mem.read16(ptr_addr)
         }
         _ => base,
     };
@@ -330,6 +393,41 @@ fn compute_indexed_addr(
                 (ea, extra_cycles)
             }
         }
+    } else {
+        (direct_addr, extra_cycles)
+    }
+}
+
+fn compute_hd6309_w_addr(
+    cpu: &mut Cpu,
+    mem: &Memory,
+    mode: IndexMode,
+    indirect: bool,
+    _extra_bytes: u8,
+) -> (u16, u8) {
+    let extra_cycles = index_extra_cycles(mode, indirect);
+    let direct_addr = match mode {
+        IndexMode::WBase => cpu.w,
+        IndexMode::WOff16 => {
+            let off = mem.read16(cpu.pc) as i16 as i32;
+            cpu.pc = cpu.pc.wrapping_add(2);
+            cpu.w.wrapping_add(off as u16)
+        }
+        IndexMode::WPostInc2 => {
+            let ea = cpu.w;
+            cpu.w = cpu.w.wrapping_add(2);
+            ea
+        }
+        IndexMode::WPreDec2 => {
+            cpu.w = cpu.w.wrapping_sub(2);
+            cpu.w
+        }
+        _ => cpu.w,
+    };
+
+    if indirect {
+        let ea = mem.read16(direct_addr);
+        (ea, extra_cycles)
     } else {
         (direct_addr, extra_cycles)
     }
@@ -536,5 +634,83 @@ mod tests {
     fn format_indirect() {
         assert_eq!(format_index_operand(0x94, &[]), "[,X]");
         assert_eq!(format_index_operand(0x98, &[0x10]), "[16,X]");
+    }
+
+    #[test]
+    fn indexed_indirect_extended() {
+        use crate::cpu::Cpu;
+
+        let mut cpu = Cpu::new();
+        cpu.pc = 0x0201;
+        let mut mem = Memory::new();
+        mem.write16(0x8104, 0x9876);
+        mem.write8(0x0201, 0x81);
+        mem.write8(0x0202, 0x04);
+
+        let ea = indexed_addr(&mut cpu, &mem, 0x9F);
+        assert_eq!(ea.addr, 0x9876);
+        assert_eq!(cpu.pc, 0x0203);
+    }
+
+    #[test]
+    fn format_hd6309_w_modes() {
+        assert_eq!(format_index_operand(0x8f, &[]), ",W");
+        assert_eq!(format_index_operand(0xaf, &[0x00, 0x10]), "16,W");
+        assert_eq!(format_index_operand(0xcf, &[]), ",W++");
+        assert_eq!(format_index_operand(0xef, &[]), ",--W");
+        assert_eq!(format_index_operand(0x90, &[]), "[,W]");
+        assert_eq!(format_index_operand(0xaf, &[0xff, 0xfe]), "-2,W");
+        assert_eq!(format_index_operand(0xb0, &[0xff, 0xfe]), "[-2,W]");
+    }
+
+    #[test]
+    fn indexed_acc_b_negative_offset() {
+        use crate::cpu::Cpu;
+
+        let mut cpu = Cpu::new();
+        cpu.y = 0x8000;
+        cpu.b = 0xFF; // -1
+        cpu.pc = 0x0100;
+        let mut mem = Memory::new();
+        mem.write8(0x7FFF, 0x34);
+
+        let ea = indexed_addr(&mut cpu, &mem, 0xA5); // LDA B,Y
+        assert_eq!(ea.addr, 0x7FFF);
+    }
+
+    #[test]
+    fn indexed_hd6309_w_modes() {
+        use crate::cpu::Cpu;
+
+        let mut cpu = Cpu::new();
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.w = 0x2000;
+        cpu.pc = 0x0100;
+        let mut mem = Memory::new();
+
+        let ea = indexed_addr(&mut cpu, &mem, 0x8f);
+        assert_eq!(ea.addr, 0x2000);
+        assert_eq!(ea.index_reg, Some('W'));
+        assert_eq!(cpu.w, 0x2000);
+
+        cpu.w = 0x2000;
+        cpu.pc = 0x0100;
+        mem.write8(0x0100, 0x00);
+        mem.write8(0x0101, 0x10);
+        let ea = indexed_addr(&mut cpu, &mem, 0xaf);
+        assert_eq!(ea.addr, 0x2010);
+        assert_eq!(cpu.pc, 0x0102);
+
+        cpu.w = 0x3000;
+        cpu.pc = 0x0200;
+        let ea = indexed_addr(&mut cpu, &mem, 0xcf);
+        assert_eq!(ea.addr, 0x3000);
+        assert_eq!(cpu.w, 0x3002);
+
+        cpu.w = 0x4000;
+        cpu.pc = 0x0300;
+        let ea = indexed_addr(&mut cpu, &mem, 0xef);
+        assert_eq!(ea.addr, 0x3ffe);
+        assert_eq!(cpu.w, 0x3ffe);
     }
 }

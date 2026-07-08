@@ -1,13 +1,18 @@
 <script lang="ts">
   import type { CpuState } from "../types";
   import { t } from "../i18n";
+  import Icon from "./Icon.svelte";
 
   let {
     cpu,
+    collapsed = false,
+    onToggleCollapse,
     onSetRegister,
     onToggleFlag,
   }: {
     cpu: CpuState | null;
+    collapsed?: boolean;
+    onToggleCollapse?: () => void;
     onSetRegister: (register: string, value: number) => void;
     onToggleFlag: (flag: string) => void;
   } = $props();
@@ -112,15 +117,63 @@
       cancelEdit();
     }
   }
+
+  // Change-highlighting: flash registers whose value changed.
+  let changed = $state<Set<string>>(new Set());
+  let prevValues: Record<string, number> = {};
+  let clearTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+
+  $effect(() => {
+    if (!cpu) return;
+    const cur: Record<string, number> = {
+      A: cpu.a, B: cpu.b, DP: cpu.dp, D: cpu.d, X: cpu.x, Y: cpu.y, U: cpu.u, S: cpu.s, PC: cpu.pc,
+    };
+    if (isHd6309) {
+      cur.W = cpu.w ?? 0; cur.V = cpu.v ?? 0; cur.E = (cpu.w ?? 0) >> 8; cur.F = (cpu.w ?? 0) & 0xff; cur.MD = cpu.mode_reg ?? 0;
+    }
+    let dirty = false;
+    const next = new Set(changed);
+    for (const [k, v] of Object.entries(cur)) {
+      if (k in prevValues && prevValues[k] !== v) {
+        next.add(k);
+        dirty = true;
+        if (clearTimers[k]) clearTimeout(clearTimers[k]);
+        clearTimers[k] = setTimeout(() => {
+          changed = new Set([...changed].filter((c) => c !== k));
+          delete clearTimers[k];
+        }, 600);
+      }
+      prevValues[k] = v;
+    }
+    if (dirty) changed = next;
+  });
+
+  $effect(() => () => {
+    for (const t of Object.values(clearTimers)) clearTimeout(t);
+  });
+
+  function isChanged(label: string): boolean {
+    return changed.has(label);
+  }
 </script>
 
-<div class="panel register-panel panel-primary">
-  <div class="panel-header">{$t("registers.title")}</div>
+<div class="panel register-panel panel-primary" class:collapsed>
+  <div class="panel-header">
+    <span class="ph-title">
+      <span class="accent-dot"></span>
+      {$t("registers.title")}
+    </span>
+    {#if onToggleCollapse}
+      <button class="hdr-btn collapse-btn" onclick={onToggleCollapse} title={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-label={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-expanded={!collapsed}>
+        <Icon name="chevron-down" size={13} />
+      </button>
+    {/if}
+  </div>
   <div class="panel-body">
     {#if cpu}
       <div class="reg-grid">
         {#each regs8 as reg}
-          <div class="reg-cell">
+          <div class="reg-cell" class:highlight={reg.highlight} class:changed={isChanged(reg.label)}>
             <span class="label">{reg.label}</span>
             {#if editing?.name === reg.label}
               <input
@@ -135,7 +188,7 @@
               <button
                 class="value mono reg-btn"
                 onclick={() => startEdit(reg.label, reg.value, 8)}
-                title={$t("registers.editHint")}
+                title={`${$t("registers.editHint")} · ${$t("registers.dec")}: ${reg.value}`}
               >{fmt8(reg.value)}</button>
             {/if}
           </div>
@@ -143,7 +196,7 @@
       </div>
       <div class="reg-grid wide">
         {#each regs16 as reg}
-          <div class="reg-cell" class:highlight={reg.highlight}>
+          <div class="reg-cell" class:highlight={reg.highlight} class:changed={isChanged(reg.label)}>
             <span class="label">{reg.label}</span>
             {#if editing?.name === reg.label}
               <input
@@ -158,7 +211,7 @@
               <button
                 class="value mono reg-btn"
                 onclick={() => startEdit(reg.label, reg.value, 16)}
-                title={$t("registers.editHint")}
+                title={`${$t("registers.editHint")} · ${$t("registers.dec")}: ${reg.value}`}
               >{fmt16(reg.value)}</button>
             {/if}
           </div>
@@ -191,6 +244,19 @@
     flex-direction: column;
   }
 
+  .register-panel.collapsed .panel-body {
+    display: none;
+  }
+
+  .collapse-btn :global(.icon) {
+    transition: transform var(--motion-normal) var(--ease-tactile);
+    margin-right: 0;
+  }
+
+  .register-panel.collapsed .collapse-btn :global(.icon) {
+    transform: rotate(-90deg);
+  }
+
   .register-panel .panel-body {
     flex: 1;
     min-height: 0;
@@ -200,8 +266,8 @@
   .reg-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin-bottom: 12px;
+    gap: 6px;
+    margin-bottom: 8px;
   }
 
   .reg-grid.wide {
@@ -209,35 +275,48 @@
   }
 
   .reg-cell {
-    background: var(--bg-deep);
+    background: var(--bg-0);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
   }
 
   .reg-cell.highlight {
-    border-color: var(--accent-dim);
-    box-shadow: 0 0 8px rgba(57, 255, 20, 0.15);
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
   }
 
   .reg-cell.highlight .value {
     color: var(--accent);
-    text-shadow: 0 0 8px rgba(57, 255, 20, 0.4);
+  }
+
+  .reg-cell.changed {
+    border-color: var(--changed);
+    animation: regFlash var(--motion-slow) var(--ease-exit);
+  }
+
+  .reg-cell.changed .value {
+    color: var(--changed);
+  }
+
+  @keyframes regFlash {
+    0% { background: var(--changed-soft); }
+    100% { background: var(--bg-0); }
   }
 
   .label {
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 600;
-    color: var(--text-dim);
+    color: var(--text-faint);
     letter-spacing: 0.1em;
   }
 
   .value {
-    font-size: 14px;
-    color: var(--accent-amber);
+    font-size: 13px;
+    color: var(--amber);
   }
 
   .reg-btn {
@@ -247,8 +326,8 @@
     text-align: left;
     cursor: pointer;
     font-family: var(--font-mono);
-    font-size: 14px;
-    color: var(--accent-amber);
+    font-size: 13px;
+    color: var(--amber);
   }
 
   .reg-btn:hover {
@@ -257,54 +336,53 @@
 
   .edit-input {
     width: 100%;
-    padding: 2px 4px;
-    font-size: 13px;
+    padding: 1px 4px;
+    font-size: 12px;
   }
 
   .flags-section {
-    margin-top: 8px;
-    padding-top: 12px;
+    margin-top: 6px;
+    padding-top: 8px;
     border-top: 1px solid var(--border);
   }
 
   .flags-label {
-    font-size: 10px;
-    color: var(--text-dim);
+    font-size: 9.5px;
+    color: var(--text-faint);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     display: block;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .flags {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 4px;
   }
 
   .flag {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
     border-radius: 4px;
     background: var(--flag-off);
-    color: var(--text-dim);
+    color: var(--text-faint);
     border: 1px solid var(--border);
-    transition: all 0.15s;
+    transition: background var(--motion-normal) ease, color var(--motion-normal) ease, border-color var(--motion-normal) ease;
     padding: 0;
     cursor: pointer;
   }
 
   .flag.on {
-    background: rgba(57, 255, 20, 0.15);
+    background: var(--accent-soft);
     color: var(--flag-on);
-    border-color: var(--accent-dim);
-    box-shadow: 0 0 6px rgba(57, 255, 20, 0.2);
+    border-color: var(--accent-line);
   }
 
   .flag:hover {

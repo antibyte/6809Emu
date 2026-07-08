@@ -47,6 +47,53 @@ pub fn cmp16(a: u16, b: u16, flags: &mut Flags) {
     sub16(a, b, flags);
 }
 
+pub fn sbc16(a: u16, b: u16, flags: &mut Flags) -> u16 {
+    let c = flags.contains(Flags::C);
+    let r = a as u32 + 0x10000 - b as u32 - u32::from(c);
+    let result = r as u16;
+    flags.set(Flags::C, (a as u32) < (b as u32) + u32::from(c));
+    flags.set(Flags::V, ((a ^ b) & (a ^ result) & 0x8000) != 0);
+    flags.set_nz16(result);
+    result
+}
+
+pub fn adc16(a: u16, b: u16, flags: &mut Flags) -> u16 {
+    let c = flags.contains(Flags::C);
+    let r = a as u32 + b as u32 + u32::from(c);
+    let result = r as u16;
+    flags.set(Flags::C, r > 0xFFFF);
+    flags.set(Flags::V, (!(a ^ b) & (a ^ result) & 0x8000) != 0);
+    flags.set_nz16(result);
+    result
+}
+
+pub fn and16(a: u16, b: u16, flags: &mut Flags) -> u16 {
+    let result = a & b;
+    flags.remove(Flags::V);
+    flags.set_nz16(result);
+    result
+}
+
+pub fn eor16(a: u16, b: u16, flags: &mut Flags) -> u16 {
+    let result = a ^ b;
+    flags.remove(Flags::V);
+    flags.set_nz16(result);
+    result
+}
+
+pub fn or16(a: u16, b: u16, flags: &mut Flags) -> u16 {
+    let result = a | b;
+    flags.remove(Flags::V);
+    flags.set_nz16(result);
+    result
+}
+
+pub fn bit16(a: u16, b: u16, flags: &mut Flags) {
+    let result = a & b;
+    flags.remove(Flags::V | Flags::C);
+    flags.set_nz16(result);
+}
+
 pub fn asl8(value: u8, flags: &mut Flags) -> u8 {
     let c = value & 0x80 != 0;
     let result = value << 1;

@@ -1,78 +1,232 @@
+/* ============================================================
+   6809 Emulator — Design System 2.0
+   Modern pro surface (VS Code / Linear feel) with precise
+   neon-green accent. Retro CRT character reserved for the
+   video + terminal surfaces (see .crt-* tokens below).
+   ============================================================ */
+
 :root,
 [data-theme="dark"] {
-  --bg-deep: #080c10;
-  --bg-panel: #0f1419;
-  --bg-elevated: #161d26;
-  --border: #243040;
+  /* Surface ramp (0 = deepest, 3 = most raised) */
+  --bg-0: #090c11;
+  --bg-1: #0f131a;
+  --bg-2: #151a24;
+  --bg-3: #1c2330;
+  --bg-hover: #202938;
+  --bg-active: #283346;
+
+  /* Legacy aliases kept for back-compat with remaining styles */
+  --bg-deep: var(--bg-0);
+  --bg-panel: var(--bg-1);
+  --bg-elevated: var(--bg-2);
+
+  /* Borders */
+  --border: #222a37;
+  --border-strong: #2e3849;
   --border-glow: #2d5a3d;
-  --text: #c8d6e5;
-  --text-dim: #6b7d8f;
-  --accent: #39ff14;
-  --accent-dim: #1a8f0f;
-  --accent-amber: #ffb000;
-  --danger: #ff4757;
-  --flag-on: #39ff14;
-  --flag-off: #2a3540;
-  --pc-highlight: rgba(57, 255, 20, 0.12);
-  --pc-border: #39ff14;
-  --grid-color: rgba(57, 255, 20, 0.02);
+
+  /* Text ramp */
+  --text: #d6deea;
+  --text-dim: #7e8a9e;
+  --text-faint: #525c6e;
+
+  /* Accent — refined neon green, used sparingly */
+  --accent: #4ade80;
+  --accent-bright: #5ef092;
+  --accent-dim: #1f9d52;
+  --accent-soft: rgba(74, 222, 128, 0.14);
+  --accent-line: rgba(74, 222, 128, 0.32);
+
+  /* Semantic */
+  --amber: #f5a623;
+  --accent-amber: var(--amber);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --danger-line: rgba(248, 113, 113, 0.36);
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.14);
+
+  /* Change / state highlights for value cells */
+  --changed: #fbbf24;
+  --changed-soft: rgba(251, 191, 36, 0.16);
+  --added: var(--accent);
+  --added-soft: var(--accent-soft);
+  --breakpoint: var(--danger);
+  --watchpoint: var(--amber);
+
+  /* Flags */
+  --flag-on: var(--accent);
+  --flag-off: #1a2230;
+
+  /* PC marker */
+  --pc-highlight: rgba(74, 222, 128, 0.10);
+  --pc-border: var(--accent);
+
+  /* CRT retro surface (video + terminal) */
+  --crt-bg: #060a10;
+  --crt-phosphor: #6ee7b7;
+  --crt-glow: rgba(110, 231, 183, 0.55);
+  --crt-border: rgba(74, 222, 128, 0.22);
+  --crt-scanline: rgba(0, 0, 0, 0.18);
+
+  /* Grid backdrop removed from app shell; reserved token */
+  --grid-color: transparent;
+
   --font-mono: "JetBrains Mono", "Consolas", monospace;
   --font-ui: "Space Grotesk", system-ui, sans-serif;
+
+  /* Radius scale */
   --radius: 8px;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --radius-sm: 5px;
+  --radius-lg: 12px;
+
+  /* 4px spacing scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* Density */
+  --header-h: 44px;
+  --status-h: 26px;
+  --panel-header-h: 30px;
+  --row-h: 22px;
+
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border);
+  --ring: 0 0 0 2px var(--accent-soft);
+
   --motion-instant: 0s;
   --motion-fast: 100ms;
-  --motion-normal: 150ms;
-  --motion-slow: 250ms;
+  --motion-normal: 160ms;
+  --motion-slow: 260ms;
   --ease-tactile: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-exit: cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 [data-theme="light"] {
-  --bg-deep: #eef2f6;
-  --bg-panel: #ffffff;
-  --bg-elevated: #f4f7fa;
-  --border: #c5d0dc;
+  --bg-0: #eef1f6;
+  --bg-1: #ffffff;
+  --bg-2: #f5f8fb;
+  --bg-3: #eaeef4;
+  --bg-hover: #e3e8f0;
+  --bg-active: #d6dce6;
+
+  --bg-deep: var(--bg-0);
+  --bg-panel: var(--bg-1);
+  --bg-elevated: var(--bg-2);
+
+  --border: #d4dbe5;
+  --border-strong: #b9c2d1;
   --border-glow: #8fbc8f;
+
   --text: #1a2330;
-  --text-dim: #5a6b7d;
-  --accent: #1a8f0f;
-  --accent-dim: #157a0d;
-  --accent-amber: #c47f00;
+  --text-dim: #566579;
+  --text-faint: #8793a5;
+
+  --accent: #15a34a;
+  --accent-bright: #0f8a3d;
+  --accent-dim: #0f7a36;
+  --accent-soft: rgba(21, 163, 74, 0.12);
+  --accent-line: rgba(21, 163, 74, 0.32);
+
+  --amber: #b4630a;
+  --accent-amber: var(--amber);
   --danger: #d63040;
-  --flag-on: #1a8f0f;
-  --flag-off: #d8e0e8;
-  --pc-highlight: rgba(26, 143, 15, 0.1);
-  --pc-border: #1a8f0f;
-  --grid-color: rgba(26, 143, 15, 0.04);
-  --shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --danger-soft: rgba(214, 48, 64, 0.10);
+  --danger-line: rgba(214, 48, 64, 0.32);
+  --info: #2563eb;
+  --info-soft: rgba(37, 99, 235, 0.10);
+
+  --changed: #b4630a;
+  --changed-soft: rgba(180, 99, 10, 0.14);
+  --added: var(--accent);
+  --added-soft: var(--accent-soft);
+  --breakpoint: var(--danger);
+  --watchpoint: var(--amber);
+
+  --flag-on: var(--accent);
+  --flag-off: #dde3ec;
+
+  --pc-highlight: rgba(21, 163, 74, 0.10);
+  --pc-border: var(--accent);
+
+  --crt-bg: #0d1410;
+  --crt-phosphor: #6ee7b7;
+  --crt-glow: rgba(110, 231, 183, 0.5);
+  --crt-border: rgba(110, 231, 183, 0.28);
+  --crt-scanline: rgba(0, 0, 0, 0.18);
+
+  --shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  --shadow-pop: 0 12px 32px rgba(15, 23, 42, 0.14), 0 0 0 1px var(--border);
+  --ring: 0 0 0 2px var(--accent-soft);
 }
 
 [data-theme="high-contrast"] {
-  --bg-deep: #000000;
-  --bg-panel: #0a0a0a;
-  --bg-elevated: #141414;
-  --border: #ffffff;
+  --bg-0: #000000;
+  --bg-1: #0a0a0a;
+  --bg-2: #121212;
+  --bg-3: #1c1c1c;
+  --bg-hover: #242424;
+  --bg-active: #2e2e2e;
+
+  --bg-deep: var(--bg-0);
+  --bg-panel: var(--bg-1);
+  --bg-elevated: var(--bg-2);
+
+  --border: #4a4a4a;
+  --border-strong: #ffffff;
   --border-glow: #00ff00;
+
   --text: #ffffff;
-  --text-dim: #cccccc;
-  --accent: #00ff00;
-  --accent-dim: #00cc00;
-  --accent-amber: #ffff00;
-  --danger: #ff4444;
-  --flag-on: #00ff00;
-  --flag-off: #333333;
-  --pc-highlight: rgba(0, 255, 0, 0.2);
-  --pc-border: #00ff00;
-  --grid-color: rgba(255, 255, 255, 0.03);
-  --shadow: 0 0 0 1px #ffffff;
+  --text-dim: #cfcfcf;
+  --text-faint: #8a8a8a;
+
+  --accent: #00ff66;
+  --accent-bright: #00ff66;
+  --accent-dim: #00cc44;
+  --accent-soft: rgba(0, 255, 102, 0.18);
+  --accent-line: rgba(0, 255, 102, 0.5);
+
+  --amber: #ffd400;
+  --accent-amber: var(--amber);
+  --danger: #ff5252;
+  --danger-soft: rgba(255, 82, 82, 0.18);
+  --danger-line: rgba(255, 82, 82, 0.5);
+  --info: #66d9ff;
+  --info-soft: rgba(102, 217, 255, 0.18);
+
+  --changed: #ffd400;
+  --changed-soft: rgba(255, 212, 0, 0.2);
+  --added: var(--accent);
+  --added-soft: var(--accent-soft);
+  --breakpoint: var(--danger);
+  --watchpoint: var(--amber);
+
+  --flag-on: var(--accent);
+  --flag-off: #2a2a2a;
+
+  --pc-highlight: rgba(0, 255, 102, 0.22);
+  --pc-border: var(--accent);
+
+  --crt-bg: #000000;
+  --crt-phosphor: #00ff66;
+  --crt-glow: rgba(0, 255, 102, 0.7);
+  --crt-border: rgba(0, 255, 102, 0.5);
+  --crt-scanline: rgba(0, 0, 0, 0.3);
+
+  --shadow: 0 0 0 1px var(--border-strong);
+  --shadow-pop: 0 0 0 2px var(--border-strong);
+  --ring: 0 0 0 2px var(--accent-soft);
 }
 
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  scrollbar-color: var(--border) var(--bg-deep);
+  scrollbar-color: var(--border-strong) transparent;
   scrollbar-width: thin;
 }
 
@@ -82,16 +236,19 @@
 }
 
 *::-webkit-scrollbar-track {
-  background: var(--bg-deep);
+  background: transparent;
 }
 
 *::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--text-dim);
+  background: var(--border-strong);
+  background-clip: padding-box;
 }
 
 html,
@@ -103,9 +260,10 @@ body,
 
 body {
   font-family: var(--font-ui);
-  background: var(--bg-deep);
+  background: var(--bg-0);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
@@ -114,14 +272,15 @@ body {
   font-size: clamp(12px, 1.4vw + 8px, 14px);
 }
 
+/* Subtle ambient vignette instead of neon grid */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
-  background-image:
-    linear-gradient(var(--grid-color) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-  background-size: 32px 32px;
+  background:
+    radial-gradient(120% 80% at 50% -10%, var(--accent-soft), transparent 60%),
+    radial-gradient(60% 50% at 100% 100%, var(--info-soft), transparent 70%);
+  opacity: 0.5;
   pointer-events: none;
   z-index: 0;
 }
@@ -130,23 +289,25 @@ button {
   font-family: var(--font-ui);
   cursor: pointer;
   border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-2);
   color: var(--text);
-  border-radius: var(--radius);
-  padding: 8px 14px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 12.5px;
   font-weight: 500;
+  line-height: 1;
   transition:
     transform var(--motion-fast) var(--ease-tactile),
     border-color var(--motion-normal) ease,
     background var(--motion-normal) ease,
     box-shadow var(--motion-normal) ease,
+    color var(--motion-normal) ease,
     opacity var(--motion-fast) ease;
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--accent-dim);
-  background: var(--bg-panel);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
 
 button:active:not(:disabled) {
@@ -161,22 +322,43 @@ button:disabled {
 button:focus-visible {
   outline: none;
   border-color: var(--accent-dim);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: var(--ring);
 }
 
 button.primary {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, var(--bg-elevated)), var(--bg-elevated));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, var(--bg-2)), var(--bg-2));
   border-color: var(--accent-dim);
   color: var(--accent);
+  font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
   border-color: var(--accent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent-bright);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 26%, var(--bg-2)), var(--bg-2));
+}
+
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+button.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 8px;
+  min-height: 28px;
 }
 
 button.danger {
-  border-color: #5a2020;
+  border-color: var(--danger-line);
   color: var(--danger);
 }
 
@@ -184,12 +366,13 @@ input,
 textarea,
 select {
   font-family: var(--font-mono);
-  background: var(--bg-deep);
+  background: var(--bg-0);
   border: 1px solid var(--border);
-  color: var(--accent);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-  font-size: 13px;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+  font-size: 12.5px;
+  transition: border-color var(--motion-normal) ease, box-shadow var(--motion-normal) ease;
 }
 
 input:focus,
@@ -197,59 +380,219 @@ textarea:focus,
 select:focus {
   outline: none;
   border-color: var(--accent-dim);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: var(--ring);
 }
 
+input.mono,
+textarea.mono,
+select.mono {
+  font-family: var(--font-mono);
+}
+
+select {
+  font-family: var(--font-ui);
+  cursor: pointer;
+  padding-right: 24px;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 9px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* ============================================================
+   Panels
+   ============================================================ */
+
 .panel {
-  background: var(--bg-panel);
+  background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);
+  min-height: 0;
+  min-width: 0;
 }
 
-/* Primary panels — core debug surfaces (disasm, registers, memory, trace)
-   Marked with a subtle accent-tinged top border for hierarchy */
+/* Primary panels — core debug surfaces get a hairline accent line */
 .panel-primary {
-  border-top: 2px solid var(--accent-dim);
+  border-top: 1px solid var(--accent-line);
 }
 
-/* Secondary panels — supporting tools (breakpoints, watchpoints, terminal, IO)
-   Header recedes into the body to visually prioritize primary surfaces */
+/* Secondary panels — supporting tools recede */
 .panel-secondary .panel-header {
-  background: var(--bg-panel);
+  background: var(--bg-1);
 }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--bg-elevated);
+  gap: var(--sp-2);
+  height: var(--panel-header-h);
+  padding: 0 var(--sp-3);
+  background: var(--bg-2);
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-dim);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.panel-header .accent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-line);
+  flex-shrink: 0;
+}
+
+.panel-header .ph-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.panel-header .ph-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .panel-body {
   flex: 1;
   overflow: auto;
-  padding: 12px;
+  min-height: 0;
 }
 
 .mono {
   font-family: var(--font-mono);
 }
 
+.accent {
+  color: var(--accent) !important;
+}
+
 .btn-icon {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+}
+
+/* Compact icon-only header button */
+.hdr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  transition: background var(--motion-normal) ease, color var(--motion-normal) ease, border-color var(--motion-normal) ease;
+}
+
+.hdr-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.hdr-btn.active {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.hdr-btn :global(.icon) {
+  margin-right: 0;
+}
+
+/* Status pill used in status bar */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  height: 17px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.pill.on {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.pill.on .dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.pill.warn {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+
+.pill.warn .dot {
+  background: var(--amber);
+}
+
+.pill.danger {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+
+.pill.danger .dot {
+  background: var(--danger);
+}
+
+/* Tooltip helper — used via title attr primarily; .tt for custom */
+[data-tt] {
+  position: relative;
+}
+
+/* Empty-state slim line */
+.empty-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.empty-line .ic {
+  opacity: 0.6;
+  flex-shrink: 0;
 }
 
 /* Touch-friendly sizing on coarse pointer devices */
@@ -270,23 +613,8 @@ select:focus {
   .narrow-hide {
     display: none !important;
   }
-
-  /* Condensed toolbar: reduce gaps and padding */
-  .toolbar-narrow .controls {
-    gap: 4px;
-  }
-
-  .toolbar-narrow .status-bar {
-    gap: 8px;
-    font-size: 10px;
-  }
-
-  .toolbar-narrow .brand .title {
-    display: none;
-  }
 }
 
-/* Safe area for narrow viewports with rounded corners or notches */
 @media (max-width: 480px) {
   .app {
     padding: 6px !important;

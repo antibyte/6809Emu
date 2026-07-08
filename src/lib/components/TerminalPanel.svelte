@@ -1,15 +1,18 @@
 <script lang="ts">
   import { t } from "../i18n";
+  import Icon from "./Icon.svelte";
   import type { AciaTerminalState } from "../types";
 
   let {
     terminal,
     baseAddr,
     onSend,
+    onClose,
   }: {
     terminal: AciaTerminalState | null;
     baseAddr: number;
     onSend: (text: string) => void;
+    onClose?: () => void;
   } = $props();
 
   let inputText = $state("");
@@ -32,22 +35,28 @@
   }
 </script>
 
-<div class="panel terminal-panel panel-secondary">
+<div class="panel terminal-panel panel-primary">
   <div class="panel-header">
-    <div class="title-group">
-      <span>{$t("acia.title")}</span>
-      <span class="base mono">{fmtAddr(baseAddr)}</span>
-    </div>
-    {#if terminal}
-      <div class="status-row">
+    <span class="ph-title"><span class="accent-dot"></span>{$t("acia.title")}<span class="base mono">{fmtAddr(baseAddr)}</span></span>
+    <div class="ph-actions">
+      {#if terminal}
         <span class="status mono" class:on={terminal.rdrf} title={$t("acia.rdrf")}>RDRF</span>
         <span class="status mono" class:on={terminal.tdre} title={$t("acia.tdre")}>TDRE</span>
         <span class="status mono" class:on={terminal.irq} title={$t("acia.irq")}>IRQ</span>
-      </div>
-    {/if}
+      {/if}
+      {#if onClose}
+        <button class="hdr-btn" onclick={onClose} title={$t("panels.close")} aria-label={$t("panels.close")}>
+          <Icon name="close" size={13} />
+        </button>
+      {/if}
+    </div>
   </div>
   <div class="panel-body">
-    <pre class="output mono">{terminal?.tx_text ?? ""}</pre>
+    <div class="crt">
+      <pre class="output mono">{terminal?.tx_text ?? ""}</pre>
+      <div class="scanlines" aria-hidden="true"></div>
+      <div class="crt-glow" aria-hidden="true"></div>
+    </div>
     <div class="input-row">
       <input
         class="mono"
@@ -70,45 +79,37 @@
     min-height: 0;
   }
 
-  .panel-header {
-    display: flex;
+  .ph-title {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .title-group {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
+    gap: 8px;
   }
 
   .base {
     color: var(--accent);
-    font-size: 11px;
+    font-size: 10.5px;
+    font-weight: 500;
   }
 
-  .status-row {
-    display: flex;
+  .ph-actions {
+    display: inline-flex;
     align-items: center;
     gap: 6px;
   }
 
   .status {
-    font-size: 10px;
+    font-size: 9.5px;
     padding: 2px 6px;
     border-radius: 3px;
     border: 1px solid var(--border);
-    color: var(--text-dim);
-    opacity: 0.5;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
   }
 
   .status.on {
-    opacity: 1;
     color: var(--accent);
-    border-color: rgba(57, 255, 20, 0.35);
-    background: rgba(57, 255, 20, 0.08);
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
   }
 
   .panel-body {
@@ -117,23 +118,56 @@
     gap: 8px;
     min-height: 0;
     flex: 1;
+    padding: 8px;
+  }
+
+  .crt {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: var(--crt-bg);
+    border: 1px solid var(--crt-border);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: inset 0 0 32px rgba(0, 0, 0, 0.45);
   }
 
   .output {
+    position: relative;
     margin: 0;
-    flex: 1;
-    min-height: 0;
+    height: 100%;
     overflow: auto;
     font-size: 12px;
     line-height: 1.45;
-    color: #93c5fd;
-    background: #0a1018;
-    border: 1px solid rgba(96, 165, 250, 0.2);
-    border-radius: 4px;
+    color: var(--crt-phosphor);
+    text-shadow: 0 0 5px var(--crt-glow);
     padding: 10px 12px;
-    box-shadow: inset 0 0 32px rgba(0, 0, 0, 0.35);
     white-space: pre-wrap;
     word-break: break-all;
+    z-index: 1;
+  }
+
+  .scanlines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--crt-scanline) 0px,
+      var(--crt-scanline) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    mix-blend-mode: multiply;
+    z-index: 2;
+  }
+
+  .crt-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.5) 100%);
+    z-index: 3;
   }
 
   .input-row {
@@ -146,7 +180,7 @@
     flex: 1;
     min-width: 0;
     padding: 6px 8px;
-    background: var(--bg-deep);
+    background: var(--bg-0);
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--text);

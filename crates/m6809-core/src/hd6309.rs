@@ -1,6 +1,7 @@
 use crate::addressing::{format_index_operand, indexed_addr};
 use crate::alu::{
-    add16, asl16, asr16, cmp16, com16, dec16, inc16, lsr16, neg16, rol16, ror16, sub16, tst16,
+    adc16, add16, add8, and16, asl16, asr16, bit16, cmp16, cmp8, com16, dec16, eor16, inc16,
+    lsr16, neg16, or16, rol16, ror16, sbc16, sub16, sub8, tst16,
 };
 use crate::cpu::{Cpu, Reg16, StepCtx, TfmPending};
 use crate::flags::Flags;
@@ -72,46 +73,105 @@ impl Cpu {
                 self.op_muld_inh(ctx);
                 true
             }
+            // D-register inherent unary (MAME page2 $40–$4F)
             0x40 => {
-                self.op_reg16_unary(ctx, "NEGW", |cpu, v| neg16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "NEGD", |cpu, v| neg16(v, &mut cpu.cc));
                 true
             }
             0x43 => {
-                self.op_reg16_unary(ctx, "COMW", |cpu, v| com16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "COMD", |cpu, v| com16(v, &mut cpu.cc));
+                true
+            }
+            0x44 => {
+                self.op_d_unary_inh(ctx, "LSRD", |cpu, v| lsr16(v, &mut cpu.cc));
                 true
             }
             0x46 => {
-                self.op_reg16_unary(ctx, "RORW", |cpu, v| ror16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "RORD", |cpu, v| ror16(v, &mut cpu.cc));
                 true
             }
             0x47 => {
-                self.op_reg16_unary(ctx, "ASRW", |cpu, v| asr16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "ASRD", |cpu, v| asr16(v, &mut cpu.cc));
                 true
             }
             0x48 => {
-                self.op_reg16_unary(ctx, "LSLW", |cpu, v| asl16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "ASLD", |cpu, v| asl16(v, &mut cpu.cc));
                 true
             }
             0x49 => {
-                self.op_reg16_unary(ctx, "ROLW", |cpu, v| rol16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "ROLD", |cpu, v| rol16(v, &mut cpu.cc));
                 true
             }
             0x4A => {
-                self.op_reg16_unary(ctx, "DECW", |cpu, v| dec16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "DECD", |cpu, v| dec16(v, &mut cpu.cc));
                 true
             }
             0x4C => {
-                self.op_reg16_unary(ctx, "INCW", |cpu, v| inc16(v, &mut cpu.cc));
+                self.op_d_unary_inh(ctx, "INCD", |cpu, v| inc16(v, &mut cpu.cc));
                 true
             }
             0x4D => {
+                tst16(self.get_reg16(Reg16::D), &mut self.cc);
+                ctx.cycles = 3;
+                ctx.mnemonic = "TSTD".into();
+                ctx.operands.clear();
+                true
+            }
+            0x4F => {
+                self.set_reg16(Reg16::D, 0);
+                self.cc.remove(Flags::V | Flags::C);
+                self.cc.insert(Flags::Z);
+                self.cc.remove(Flags::N);
+                ctx.cycles = 3;
+                ctx.mnemonic = "CLRD".into();
+                ctx.operands.clear();
+                true
+            }
+            // W-register inherent unary (MAME page2 $50–$5F)
+            0x50 => {
+                self.op_w_unary_inh(ctx, "NEGW", |cpu, v| neg16(v, &mut cpu.cc));
+                true
+            }
+            0x53 => {
+                self.op_w_unary_inh(ctx, "COMW", |cpu, v| com16(v, &mut cpu.cc));
+                true
+            }
+            0x54 => {
+                self.op_w_unary_inh(ctx, "LSRW", |cpu, v| lsr16(v, &mut cpu.cc));
+                true
+            }
+            0x56 => {
+                self.op_w_unary_inh(ctx, "RORW", |cpu, v| ror16(v, &mut cpu.cc));
+                true
+            }
+            0x57 => {
+                self.op_w_unary_inh(ctx, "ASRW", |cpu, v| asr16(v, &mut cpu.cc));
+                true
+            }
+            0x58 => {
+                self.op_w_unary_inh(ctx, "LSLW", |cpu, v| asl16(v, &mut cpu.cc));
+                true
+            }
+            0x59 => {
+                self.op_w_unary_inh(ctx, "ROLW", |cpu, v| rol16(v, &mut cpu.cc));
+                true
+            }
+            0x5A => {
+                self.op_w_unary_inh(ctx, "DECW", |cpu, v| dec16(v, &mut cpu.cc));
+                true
+            }
+            0x5C => {
+                self.op_w_unary_inh(ctx, "INCW", |cpu, v| inc16(v, &mut cpu.cc));
+                true
+            }
+            0x5D => {
                 tst16(self.w, &mut self.cc);
                 ctx.cycles = 3;
                 ctx.mnemonic = "TSTW".into();
                 ctx.operands.clear();
                 true
             }
-            0x4F => {
+            0x5F => {
                 self.w = 0;
                 self.cc.remove(Flags::V | Flags::C);
                 self.cc.insert(Flags::Z);
@@ -119,110 +179,6 @@ impl Cpu {
                 ctx.cycles = 3;
                 ctx.mnemonic = "CLRW".into();
                 ctx.operands.clear();
-                true
-            }
-            0x50 => {
-                self.op_w_unary_dir(mem, ctx, "NEGW", |cpu, v| neg16(v, &mut cpu.cc));
-                true
-            }
-            0x53 => {
-                self.op_w_unary_dir(mem, ctx, "COMW", |cpu, v| com16(v, &mut cpu.cc));
-                true
-            }
-            0x54 => {
-                self.op_w_unary_dir(mem, ctx, "LSRW", |cpu, v| lsr16(v, &mut cpu.cc));
-                true
-            }
-            0x56 => {
-                self.op_w_unary_dir(mem, ctx, "RORW", |cpu, v| ror16(v, &mut cpu.cc));
-                true
-            }
-            0x57 => {
-                self.op_w_unary_dir(mem, ctx, "ASRW", |cpu, v| asr16(v, &mut cpu.cc));
-                true
-            }
-            0x58 => {
-                self.op_w_unary_dir(mem, ctx, "LSLW", |cpu, v| asl16(v, &mut cpu.cc));
-                true
-            }
-            0x59 => {
-                self.op_w_unary_dir(mem, ctx, "ROLW", |cpu, v| rol16(v, &mut cpu.cc));
-                true
-            }
-            0x5A => {
-                self.op_w_unary_dir(mem, ctx, "DECW", |cpu, v| dec16(v, &mut cpu.cc));
-                true
-            }
-            0x5C => {
-                self.op_w_unary_dir(mem, ctx, "INCW", |cpu, v| inc16(v, &mut cpu.cc));
-                true
-            }
-            0x5D => {
-                self.op_w_unary_dir(mem, ctx, "TSTW", |cpu, v| {
-                    tst16(v, &mut cpu.cc);
-                    v
-                });
-                true
-            }
-            0x5F => {
-                self.op_w_unary_dir(mem, ctx, "CLRW", |cpu, _| {
-                    cpu.cc.remove(Flags::V | Flags::C);
-                    cpu.cc.insert(Flags::Z);
-                    cpu.cc.remove(Flags::N);
-                    0
-                });
-                true
-            }
-            0x60 => {
-                self.op_w_unary_idx(mem, ctx, "NEGW", |cpu, v| neg16(v, &mut cpu.cc));
-                true
-            }
-            0x63 => {
-                self.op_w_unary_idx(mem, ctx, "COMW", |cpu, v| com16(v, &mut cpu.cc));
-                true
-            }
-            0x64 => {
-                self.op_w_unary_idx(mem, ctx, "LSRW", |cpu, v| lsr16(v, &mut cpu.cc));
-                true
-            }
-            0x66 => {
-                self.op_w_unary_idx(mem, ctx, "RORW", |cpu, v| ror16(v, &mut cpu.cc));
-                true
-            }
-            0x67 => {
-                self.op_w_unary_idx(mem, ctx, "ASRW", |cpu, v| asr16(v, &mut cpu.cc));
-                true
-            }
-            0x68 => {
-                self.op_w_unary_idx(mem, ctx, "LSLW", |cpu, v| asl16(v, &mut cpu.cc));
-                true
-            }
-            0x69 => {
-                self.op_w_unary_idx(mem, ctx, "ROLW", |cpu, v| rol16(v, &mut cpu.cc));
-                true
-            }
-            0x6A => {
-                self.op_w_unary_idx(mem, ctx, "DECW", |cpu, v| dec16(v, &mut cpu.cc));
-                true
-            }
-            0x6C => {
-                self.op_w_unary_idx(mem, ctx, "INCW", |cpu, v| inc16(v, &mut cpu.cc));
-                true
-            }
-            0x6D => {
-                self.op_w_unary_idx(mem, ctx, "TSTW", |cpu, v| {
-                    tst16(v, &mut cpu.cc);
-                    v
-                });
-                true
-            }
-            0x6F => {
-                self.op_w_unary_idx(mem, ctx, "CLRW", |cpu, _| {
-                    cpu.cc.remove(Flags::V | Flags::C);
-                    cpu.cc.insert(Flags::Z);
-                    cpu.cc.remove(Flags::N);
-                    0
-                });
                 true
             }
             0x80 => {
@@ -234,6 +190,30 @@ impl Cpu {
                     cmp16(a, b, &mut cpu.cc);
                     a
                 });
+                true
+            }
+            0x82 => {
+                self.op_d_alu16_imm(mem, ctx, "SBCD", |cpu, a, b| sbc16(a, b, &mut cpu.cc));
+                true
+            }
+            0x84 => {
+                self.op_d_alu16_imm(mem, ctx, "ANDD", |cpu, a, b| and16(a, b, &mut cpu.cc));
+                true
+            }
+            0x85 => {
+                self.op_d_bit16_imm(mem, ctx, "BITD");
+                true
+            }
+            0x88 => {
+                self.op_d_alu16_imm(mem, ctx, "EORD", |cpu, a, b| eor16(a, b, &mut cpu.cc));
+                true
+            }
+            0x89 => {
+                self.op_d_alu16_imm(mem, ctx, "ADCD", |cpu, a, b| adc16(a, b, &mut cpu.cc));
+                true
+            }
+            0x8A => {
+                self.op_d_alu16_imm(mem, ctx, "ORD", |cpu, a, b| or16(a, b, &mut cpu.cc));
                 true
             }
             0x8B => {
@@ -251,6 +231,30 @@ impl Cpu {
                 });
                 true
             }
+            0x92 => {
+                self.op_d_alu16_dir(mem, ctx, "SBCD", |cpu, a, b| sbc16(a, b, &mut cpu.cc));
+                true
+            }
+            0x94 => {
+                self.op_d_alu16_dir(mem, ctx, "ANDD", |cpu, a, b| and16(a, b, &mut cpu.cc));
+                true
+            }
+            0x95 => {
+                self.op_d_bit16_dir(mem, ctx, "BITD");
+                true
+            }
+            0x98 => {
+                self.op_d_alu16_dir(mem, ctx, "EORD", |cpu, a, b| eor16(a, b, &mut cpu.cc));
+                true
+            }
+            0x99 => {
+                self.op_d_alu16_dir(mem, ctx, "ADCD", |cpu, a, b| adc16(a, b, &mut cpu.cc));
+                true
+            }
+            0x9A => {
+                self.op_d_alu16_dir(mem, ctx, "ORD", |cpu, a, b| or16(a, b, &mut cpu.cc));
+                true
+            }
             0x9B => {
                 self.op_alu16_dir(mem, ctx, "ADDW", |cpu, a, b| add16(a, b, &mut cpu.cc));
                 true
@@ -266,6 +270,30 @@ impl Cpu {
                 });
                 true
             }
+            0xA2 => {
+                self.op_d_alu16_idx(mem, ctx, "SBCD", |cpu, a, b| sbc16(a, b, &mut cpu.cc));
+                true
+            }
+            0xA4 => {
+                self.op_d_alu16_idx(mem, ctx, "ANDD", |cpu, a, b| and16(a, b, &mut cpu.cc));
+                true
+            }
+            0xA5 => {
+                self.op_d_bit16_idx(mem, ctx, "BITD");
+                true
+            }
+            0xA8 => {
+                self.op_d_alu16_idx(mem, ctx, "EORD", |cpu, a, b| eor16(a, b, &mut cpu.cc));
+                true
+            }
+            0xA9 => {
+                self.op_d_alu16_idx(mem, ctx, "ADCD", |cpu, a, b| adc16(a, b, &mut cpu.cc));
+                true
+            }
+            0xAA => {
+                self.op_d_alu16_idx(mem, ctx, "ORD", |cpu, a, b| or16(a, b, &mut cpu.cc));
+                true
+            }
             0xAB => {
                 self.op_alu16_idx(mem, ctx, "ADDW", |cpu, a, b| add16(a, b, &mut cpu.cc));
                 true
@@ -279,6 +307,30 @@ impl Cpu {
                     cmp16(a, b, &mut cpu.cc);
                     a
                 });
+                true
+            }
+            0xB2 => {
+                self.op_d_alu16_ext(mem, ctx, "SBCD", |cpu, a, b| sbc16(a, b, &mut cpu.cc));
+                true
+            }
+            0xB4 => {
+                self.op_d_alu16_ext(mem, ctx, "ANDD", |cpu, a, b| and16(a, b, &mut cpu.cc));
+                true
+            }
+            0xB5 => {
+                self.op_d_bit16_ext(mem, ctx, "BITD");
+                true
+            }
+            0xB8 => {
+                self.op_d_alu16_ext(mem, ctx, "EORD", |cpu, a, b| eor16(a, b, &mut cpu.cc));
+                true
+            }
+            0xB9 => {
+                self.op_d_alu16_ext(mem, ctx, "ADCD", |cpu, a, b| adc16(a, b, &mut cpu.cc));
+                true
+            }
+            0xBA => {
+                self.op_d_alu16_ext(mem, ctx, "ORD", |cpu, a, b| or16(a, b, &mut cpu.cc));
                 true
             }
             0xBB => {
@@ -376,6 +428,274 @@ impl Cpu {
                 ctx.cycles = 4;
                 ctx.mnemonic = "LDMD".into();
                 ctx.operands = format!("#${imm:02X}");
+                true
+            }
+            // E-register inherent unary (page3 $43–$4F)
+            0x43 => {
+                self.op_e_unary_inh(ctx, "COME", |cpu, v| cpu.op_com8(v));
+                true
+            }
+            0x4A => {
+                self.op_e_unary_inh(ctx, "DECE", |cpu, v| cpu.op_dec8(v));
+                true
+            }
+            0x4C => {
+                self.op_e_unary_inh(ctx, "INCE", |cpu, v| cpu.op_inc8(v));
+                true
+            }
+            0x4D => {
+                self.op_e_tst(ctx);
+                true
+            }
+            0x4F => {
+                self.op_e_clr(ctx);
+                true
+            }
+            // F-register inherent unary (page3 $53–$5F)
+            0x53 => {
+                self.op_f_unary_inh(ctx, "COMF", |cpu, v| cpu.op_com8(v));
+                true
+            }
+            0x5A => {
+                self.op_f_unary_inh(ctx, "DECF", |cpu, v| cpu.op_dec8(v));
+                true
+            }
+            0x5C => {
+                self.op_f_unary_inh(ctx, "INCF", |cpu, v| cpu.op_inc8(v));
+                true
+            }
+            0x5D => {
+                self.op_f_tst(ctx);
+                true
+            }
+            0x5F => {
+                self.op_f_clr(ctx);
+                true
+            }
+            // E-register ALU (page3 $80–$B7)
+            0x80 => {
+                self.op_e_alu8_imm(mem, ctx, "SUBE", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0x81 => {
+                self.op_e_alu8_imm(mem, ctx, "CMPE", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0x86 => {
+                self.op_e_ld8_imm(mem, ctx);
+                true
+            }
+            0x8B => {
+                self.op_e_alu8_imm(mem, ctx, "ADDE", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
+                true
+            }
+            0x90 => {
+                self.op_e_alu8_dir(mem, ctx, "SUBE", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0x91 => {
+                self.op_e_alu8_dir(mem, ctx, "CMPE", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0x96 => {
+                self.op_e_ld8_dir(mem, ctx);
+                true
+            }
+            0x97 => {
+                self.op_e_st8_dir(mem, ctx);
+                true
+            }
+            0x9B => {
+                self.op_e_alu8_dir(mem, ctx, "ADDE", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
+                true
+            }
+            0xA0 => {
+                self.op_e_alu8_idx(mem, ctx, "SUBE", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0xA1 => {
+                self.op_e_alu8_idx(mem, ctx, "CMPE", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0xA6 => {
+                self.op_e_ld8_idx(mem, ctx);
+                true
+            }
+            0xA7 => {
+                self.op_e_st8_idx(mem, ctx);
+                true
+            }
+            0xAB => {
+                self.op_e_alu8_idx(mem, ctx, "ADDE", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
+                true
+            }
+            0xB0 => {
+                self.op_e_alu8_ext(mem, ctx, "SUBE", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0xB1 => {
+                self.op_e_alu8_ext(mem, ctx, "CMPE", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0xB6 => {
+                self.op_e_ld8_ext(mem, ctx);
+                true
+            }
+            0xB7 => {
+                self.op_e_st8_ext(mem, ctx);
+                true
+            }
+            0xBB => {
+                self.op_e_alu8_ext(mem, ctx, "ADDE", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
+                true
+            }
+            // F-register ALU (page3 $C0–$F7)
+            0xC0 => {
+                self.op_f_alu8_imm(mem, ctx, "SUBF", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0xC1 => {
+                self.op_f_alu8_imm(mem, ctx, "CMPF", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0xC6 => {
+                self.op_f_ld8_imm(mem, ctx);
+                true
+            }
+            0xCB => {
+                self.op_f_alu8_imm(mem, ctx, "ADDF", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
+                true
+            }
+            0xD0 => {
+                self.op_f_alu8_dir(mem, ctx, "SUBF", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0xD1 => {
+                self.op_f_alu8_dir(mem, ctx, "CMPF", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0xD6 => {
+                self.op_f_ld8_dir(mem, ctx);
+                true
+            }
+            0xD7 => {
+                self.op_f_st8_dir(mem, ctx);
+                true
+            }
+            0xDB => {
+                self.op_f_alu8_dir(mem, ctx, "ADDF", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
+                true
+            }
+            0xE0 => {
+                self.op_f_alu8_idx(mem, ctx, "SUBF", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0xE1 => {
+                self.op_f_alu8_idx(mem, ctx, "CMPF", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0xE6 => {
+                self.op_f_ld8_idx(mem, ctx);
+                true
+            }
+            0xE7 => {
+                self.op_f_st8_idx(mem, ctx);
+                true
+            }
+            0xEB => {
+                self.op_f_alu8_idx(mem, ctx, "ADDF", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
+                true
+            }
+            0xF0 => {
+                self.op_f_alu8_ext(mem, ctx, "SUBF", |a, b, f| {
+                    sub8(a, b, false, f);
+                    a.wrapping_sub(b)
+                });
+                true
+            }
+            0xF1 => {
+                self.op_f_alu8_ext(mem, ctx, "CMPF", |a, b, f| {
+                    cmp8(a, b, f);
+                    a
+                });
+                true
+            }
+            0xF6 => {
+                self.op_f_ld8_ext(mem, ctx);
+                true
+            }
+            0xF7 => {
+                self.op_f_st8_ext(mem, ctx);
+                true
+            }
+            0xFB => {
+                self.op_f_alu8_ext(mem, ctx, "ADDF", |a, b, f| {
+                    add8(a, b, false, f);
+                    a.wrapping_add(b)
+                });
                 true
             }
             0x8F => {
@@ -849,7 +1169,6 @@ impl Cpu {
             0x0000
         };
         self.set_reg16(Reg16::D, d);
-        self.cc.remove(Flags::V);
         self.cc.set_nz16(self.get_reg16(Reg16::D));
         ctx.cycles = 3;
         ctx.mnemonic = "SEXW".into();
@@ -980,7 +1299,35 @@ impl Cpu {
         ctx.operands = op_str;
     }
 
-    fn op_reg16_unary<F>(&mut self, ctx: &mut StepCtx, name: &str, op: F)
+    fn get_e(&self) -> u8 {
+        (self.w >> 8) as u8
+    }
+
+    fn get_f(&self) -> u8 {
+        self.w as u8
+    }
+
+    fn set_e(&mut self, value: u8) {
+        self.w = (self.w & 0x00FF) | ((value as u16) << 8);
+    }
+
+    fn set_f(&mut self, value: u8) {
+        self.w = (self.w & 0xFF00) | u16::from(value);
+    }
+
+    fn op_d_unary_inh<F>(&mut self, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: FnOnce(&mut Cpu, u16) -> u16,
+    {
+        let d = self.get_reg16(Reg16::D);
+        let result = op(self, d);
+        self.set_reg16(Reg16::D, result);
+        ctx.cycles = 3;
+        ctx.mnemonic = name.into();
+        ctx.operands.clear();
+    }
+
+    fn op_w_unary_inh<F>(&mut self, ctx: &mut StepCtx, name: &str, op: F)
     where
         F: FnOnce(&mut Cpu, u16) -> u16,
     {
@@ -990,33 +1337,390 @@ impl Cpu {
         ctx.operands.clear();
     }
 
-    fn op_w_unary_dir<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    fn op_e_unary_inh<F>(&mut self, ctx: &mut StepCtx, name: &str, op: F)
     where
-        F: FnOnce(&mut Cpu, u16) -> u16,
+        F: FnOnce(&mut Cpu, u8) -> u8,
+    {
+        let e = self.get_e();
+        let result = op(self, e);
+        self.set_e(result);
+        ctx.cycles = 3;
+        ctx.mnemonic = name.into();
+        ctx.operands.clear();
+    }
+
+    fn op_f_unary_inh<F>(&mut self, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: FnOnce(&mut Cpu, u8) -> u8,
+    {
+        let f = self.get_f();
+        let result = op(self, f);
+        self.set_f(result);
+        ctx.cycles = 3;
+        ctx.mnemonic = name.into();
+        ctx.operands.clear();
+    }
+
+    fn op_e_tst(&mut self, ctx: &mut StepCtx) {
+        self.cc.remove(Flags::V | Flags::C);
+        self.cc.set_nz8(self.get_e());
+        ctx.cycles = 3;
+        ctx.mnemonic = "TSTE".into();
+        ctx.operands.clear();
+    }
+
+    fn op_f_tst(&mut self, ctx: &mut StepCtx) {
+        self.cc.remove(Flags::V | Flags::C);
+        self.cc.set_nz8(self.get_f());
+        ctx.cycles = 3;
+        ctx.mnemonic = "TSTF".into();
+        ctx.operands.clear();
+    }
+
+    fn op_e_clr(&mut self, ctx: &mut StepCtx) {
+        self.set_e(0);
+        self.cc.remove(Flags::V | Flags::C);
+        self.cc.insert(Flags::Z);
+        self.cc.remove(Flags::N);
+        ctx.cycles = 3;
+        ctx.mnemonic = "CLRE".into();
+        ctx.operands.clear();
+    }
+
+    fn op_f_clr(&mut self, ctx: &mut StepCtx) {
+        self.set_f(0);
+        self.cc.remove(Flags::V | Flags::C);
+        self.cc.insert(Flags::Z);
+        self.cc.remove(Flags::N);
+        ctx.cycles = 3;
+        ctx.mnemonic = "CLRF".into();
+        ctx.operands.clear();
+    }
+
+    fn op_d_alu16_imm<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: FnOnce(&mut Cpu, u16, u16) -> u16,
+    {
+        let val = self.fetch_imm16(mem, ctx);
+        let d = self.get_reg16(Reg16::D);
+        let result = op(self, d, val);
+        self.set_reg16(Reg16::D, result);
+        ctx.cycles = 5;
+        ctx.mnemonic = name.into();
+        ctx.operands = format!("#${val:04X}");
+    }
+
+    fn op_d_alu16_dir<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: FnOnce(&mut Cpu, u16, u16) -> u16,
     {
         let (addr, op_str) = self.addr_direct(mem, ctx);
         let val = mem.read16(addr);
-        let result = op(self, val);
-        if name != "TSTW" {
-            mem.write16(addr, result);
-        }
+        let d = self.get_reg16(Reg16::D);
+        let result = op(self, d, val);
+        self.set_reg16(Reg16::D, result);
         ctx.cycles = 7;
         ctx.mnemonic = name.into();
         ctx.operands = op_str;
     }
 
-    fn op_w_unary_idx<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    fn op_d_alu16_idx<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
     where
-        F: FnOnce(&mut Cpu, u16) -> u16,
+        F: FnOnce(&mut Cpu, u16, u16) -> u16,
     {
         let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
         let val = mem.read16(addr);
-        let result = op(self, val);
-        if name != "TSTW" {
-            mem.write16(addr, result);
-        }
+        let d = self.get_reg16(Reg16::D);
+        let result = op(self, d, val);
+        self.set_reg16(Reg16::D, result);
         ctx.cycles = 7 + extra as u32;
         ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_d_alu16_ext<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: FnOnce(&mut Cpu, u16, u16) -> u16,
+    {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        let val = mem.read16(addr);
+        let d = self.get_reg16(Reg16::D);
+        let result = op(self, d, val);
+        self.set_reg16(Reg16::D, result);
+        ctx.cycles = 8;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_d_bit16_imm(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str) {
+        let val = self.fetch_imm16(mem, ctx);
+        bit16(self.get_reg16(Reg16::D), val, &mut self.cc);
+        ctx.cycles = 5;
+        ctx.mnemonic = name.into();
+        ctx.operands = format!("#${val:04X}");
+    }
+
+    fn op_d_bit16_dir(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str) {
+        let (addr, op_str) = self.addr_direct(mem, ctx);
+        bit16(self.get_reg16(Reg16::D), mem.read16(addr), &mut self.cc);
+        ctx.cycles = 7;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_d_bit16_idx(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str) {
+        let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
+        bit16(self.get_reg16(Reg16::D), mem.read16(addr), &mut self.cc);
+        ctx.cycles = 7 + extra as u32;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_d_bit16_ext(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str) {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        bit16(self.get_reg16(Reg16::D), mem.read16(addr), &mut self.cc);
+        ctx.cycles = 8;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_alu8_imm<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let val = self.fetch_imm8(mem, ctx);
+        let result = op(self.get_e(), val, &mut self.cc);
+        self.set_e(result);
+        ctx.cycles = 3;
+        ctx.mnemonic = name.into();
+        ctx.operands = format!("#${val:02X}");
+    }
+
+    fn op_e_alu8_dir<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let (addr, op_str) = self.addr_direct(mem, ctx);
+        let val = mem.read8(addr);
+        let result = op(self.get_e(), val, &mut self.cc);
+        self.set_e(result);
+        ctx.cycles = 5;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_alu8_idx<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
+        let val = mem.read8(addr);
+        let result = op(self.get_e(), val, &mut self.cc);
+        self.set_e(result);
+        ctx.cycles = 5 + extra as u32;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_alu8_ext<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        let val = mem.read8(addr);
+        let result = op(self.get_e(), val, &mut self.cc);
+        self.set_e(result);
+        ctx.cycles = 6;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_ld8_imm(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let val = self.fetch_imm8(mem, ctx);
+        self.set_e(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 3;
+        ctx.mnemonic = "LDE".into();
+        ctx.operands = format!("#${val:02X}");
+    }
+
+    fn op_e_ld8_dir(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_direct(mem, ctx);
+        let val = mem.read8(addr);
+        self.set_e(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 5;
+        ctx.mnemonic = "LDE".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_ld8_idx(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
+        let val = mem.read8(addr);
+        self.set_e(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 5 + extra as u32;
+        ctx.mnemonic = "LDE".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_ld8_ext(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        let val = mem.read8(addr);
+        self.set_e(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 6;
+        ctx.mnemonic = "LDE".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_st8_dir(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_direct(mem, ctx);
+        mem.write8(addr, self.get_e());
+        self.cc.remove(Flags::V);
+        self.cc.set_nz8(self.get_e());
+        ctx.cycles = 5;
+        ctx.mnemonic = "STE".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_st8_idx(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
+        mem.write8(addr, self.get_e());
+        self.cc.remove(Flags::V);
+        self.cc.set_nz8(self.get_e());
+        ctx.cycles = 5 + extra as u32;
+        ctx.mnemonic = "STE".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_e_st8_ext(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        mem.write8(addr, self.get_e());
+        self.cc.remove(Flags::V);
+        self.cc.set_nz8(self.get_e());
+        ctx.cycles = 6;
+        ctx.mnemonic = "STE".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_alu8_imm<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let val = self.fetch_imm8(mem, ctx);
+        let result = op(self.get_f(), val, &mut self.cc);
+        self.set_f(result);
+        ctx.cycles = 3;
+        ctx.mnemonic = name.into();
+        ctx.operands = format!("#${val:02X}");
+    }
+
+    fn op_f_alu8_dir<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let (addr, op_str) = self.addr_direct(mem, ctx);
+        let val = mem.read8(addr);
+        let result = op(self.get_f(), val, &mut self.cc);
+        self.set_f(result);
+        ctx.cycles = 5;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_alu8_idx<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
+        let val = mem.read8(addr);
+        let result = op(self.get_f(), val, &mut self.cc);
+        self.set_f(result);
+        ctx.cycles = 5 + extra as u32;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_alu8_ext<F>(&mut self, mem: &mut Memory, ctx: &mut StepCtx, name: &str, op: F)
+    where
+        F: Fn(u8, u8, &mut Flags) -> u8,
+    {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        let val = mem.read8(addr);
+        let result = op(self.get_f(), val, &mut self.cc);
+        self.set_f(result);
+        ctx.cycles = 6;
+        ctx.mnemonic = name.into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_ld8_imm(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let val = self.fetch_imm8(mem, ctx);
+        self.set_f(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 3;
+        ctx.mnemonic = "LDF".into();
+        ctx.operands = format!("#${val:02X}");
+    }
+
+    fn op_f_ld8_dir(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_direct(mem, ctx);
+        let val = mem.read8(addr);
+        self.set_f(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 5;
+        ctx.mnemonic = "LDF".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_ld8_idx(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
+        let val = mem.read8(addr);
+        self.set_f(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 5 + extra as u32;
+        ctx.mnemonic = "LDF".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_ld8_ext(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        let val = mem.read8(addr);
+        self.set_f(val);
+        self.cc.set_nz8(val);
+        ctx.cycles = 6;
+        ctx.mnemonic = "LDF".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_st8_dir(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_direct(mem, ctx);
+        mem.write8(addr, self.get_f());
+        self.cc.remove(Flags::V);
+        self.cc.set_nz8(self.get_f());
+        ctx.cycles = 5;
+        ctx.mnemonic = "STF".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_st8_idx(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, extra, op_str) = self.addr_indexed(mem, ctx);
+        mem.write8(addr, self.get_f());
+        self.cc.remove(Flags::V);
+        self.cc.set_nz8(self.get_f());
+        ctx.cycles = 5 + extra as u32;
+        ctx.mnemonic = "STF".into();
+        ctx.operands = op_str;
+    }
+
+    fn op_f_st8_ext(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        let (addr, op_str) = self.addr_extended(mem, ctx);
+        mem.write8(addr, self.get_f());
+        self.cc.remove(Flags::V);
+        self.cc.set_nz8(self.get_f());
+        ctx.cycles = 6;
+        ctx.mnemonic = "STF".into();
         ctx.operands = op_str;
     }
 
@@ -1357,6 +2061,82 @@ mod tests {
         let mut mem = Memory::new();
         let _ = mem.load_binary(pc, bytes);
         mem
+    }
+
+    #[test]
+    fn negd_operates_on_d_not_w() {
+        let mut cpu = Cpu::new();
+        cpu.pc = 0x0100;
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.a = 0x00;
+        cpu.b = 0x05;
+        cpu.w = 0x1234;
+        let mut mem = mem_with_program(0x0100, &[0x10, 0x40]);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.mnemonic, "NEGD");
+        assert_eq!(cpu.get_reg16(Reg16::D), 0xFFFB);
+        assert_eq!(cpu.w, 0x1234);
+    }
+
+    #[test]
+    fn negw_inherent_on_page2() {
+        let mut cpu = Cpu::new();
+        cpu.pc = 0x0100;
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.w = 0x0005;
+        let mut mem = mem_with_program(0x0100, &[0x10, 0x50]);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.mnemonic, "NEGW");
+        assert_eq!(cpu.w, 0xFFFB);
+    }
+
+    #[test]
+    fn andd_imm_masks_d_register() {
+        let mut cpu = Cpu::new();
+        cpu.pc = 0x0100;
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.a = 0xFF;
+        cpu.b = 0x0F;
+        let mut mem = mem_with_program(0x0100, &[0x10, 0x84, 0x00, 0xF0]);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.mnemonic, "ANDD");
+        assert_eq!(cpu.get_reg16(Reg16::D), 0x0000);
+    }
+
+    #[test]
+    fn lde_imm_loads_high_byte_of_w() {
+        let mut cpu = Cpu::new();
+        cpu.pc = 0x0100;
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.w = 0x0000;
+        let mut mem = mem_with_program(0x0100, &[0x11, 0x86, 0xAB]);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.mnemonic, "LDE");
+        assert_eq!(cpu.w, 0xAB00);
+    }
+
+    #[test]
+    fn ldf_imm_loads_low_byte_of_w() {
+        let mut cpu = Cpu::new();
+        cpu.pc = 0x0100;
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.w = 0x0000;
+        let mut mem = mem_with_program(0x0100, &[0x11, 0xC6, 0xCD]);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.mnemonic, "LDF");
+        assert_eq!(cpu.w, 0x00CD);
+    }
+
+    #[test]
+    fn come_complements_e_register() {
+        let mut cpu = Cpu::new();
+        cpu.pc = 0x0100;
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.w = 0x5500;
+        let mut mem = mem_with_program(0x0100, &[0x11, 0x43]);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.mnemonic, "COME");
+        assert_eq!(cpu.w, 0xAA00);
     }
 
     #[test]

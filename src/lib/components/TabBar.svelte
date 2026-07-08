@@ -27,23 +27,24 @@
 <style>
   .tab-bar {
     display: flex;
-    gap: 4px;
-    padding: 4px;
-    background: var(--bg-panel);
+    gap: 2px;
+    padding: 3px;
+    background: var(--bg-1);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-sm);
     overflow-x: auto;
+    flex-shrink: 0;
   }
 
   .tab {
-    padding: 6px 12px;
+    padding: 5px 12px;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: 5px;
     color: var(--text-dim);
     white-space: nowrap;
     transition:
@@ -52,8 +53,13 @@
       color var(--motion-normal) ease;
   }
 
+  .tab:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+  }
+
   .tab.active {
-    background: var(--bg-elevated);
+    background: var(--bg-2);
     border-color: var(--border);
     color: var(--accent);
   }

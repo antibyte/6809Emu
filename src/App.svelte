@@ -9,17 +9,32 @@
   import MemoryView from "./lib/components/MemoryView.svelte";
   import TraceLog from "./lib/components/TraceLog.svelte";
   import Toast from "./lib/components/Toast.svelte";
-  import Icon from "./lib/components/Icon.svelte";
   import OnboardingBanner from "./lib/components/OnboardingBanner.svelte";
   import TabBar from "./lib/components/TabBar.svelte";
   import IoPanel from "./lib/components/IoPanel.svelte";
   import VideoModal from "./lib/components/VideoModal.svelte";
+  import VideoPanel from "./lib/components/VideoPanel.svelte";
   import TerminalPanel from "./lib/components/TerminalPanel.svelte";
   import Splitter from "./lib/components/Splitter.svelte";
+  import AppHeader from "./lib/components/AppHeader.svelte";
+  import StatusBar from "./lib/components/StatusBar.svelte";
+  import ShortcutsOverlay from "./lib/components/ShortcutsOverlay.svelte";
   import { t, locale, toggleLocale } from "./lib/i18n";
   import { theme, cycleTheme } from "./lib/theme";
   import { showToast } from "./lib/toast";
   import { registerShortcuts } from "./lib/shortcuts";
+  import {
+    layout,
+    togglePanel,
+    setPanel,
+    toggleCollapsed,
+    patchSizes,
+    redistribute,
+    getLayout,
+    defaultLayoutState,
+    type PanelId,
+    type SidebarSection,
+  } from "./lib/layout";
   import type { AciaConfig, AciaTerminalState, CpuState, CpuVariant, DisasmLine, MachineInfo, MachineKind, MachineState, TraceEntry, VideoFrame } from "./lib/types";
   import * as api from "./lib/api";
 
@@ -81,91 +96,46 @@ start   LDA  #$42
   let assembling = $state(false);
   let lastTrap = $state<string | null>(null);
   let compactLayout = $state(false);
-  let narrowLayout = $state(false);
   let activeMainTab = $state("disasm");
+  let activeBottomTab = $state("memory");
+  let showShortcuts = $state(false);
+  let showVideoModal = $state(false);
 
-  type LayoutSizes = {
-    mainPct: number;
-    sidebarPx: number;
-    disasmPct: number;
-  };
-
-  type ResizeTarget =
-    | "main-bottom"
-    | "sidebar-main"
-    | "disasm-asm"
-
-  const LAYOUT_STORAGE_KEY = "layoutSizes";
-  const DEFAULT_LAYOUT_SIZES: LayoutSizes = {
-    mainPct: 62,
-    sidebarPx: 300,
-    disasmPct: 52,
-  };
   const LAYOUT_LIMITS = {
     splitterPx: 10,
-    mainMinPx: 320,
-    bottomMinPx: 220,
-    sidebarMinPx: 260,
-    sidebarMaxPx: 420,
-    disasmMinPx: 300,
-    asmMinPx: 300,
+    mainMinPx: 300,
+    bottomMinPx: 200,
+    sidebarMinPx: 240,
+    sidebarMaxPx: 460,
+    disasmMinPx: 280,
+    asmMinPx: 280,
+    videoMinPx: 240,
+    videoMaxPx: 640,
   } as const;
 
   function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
   }
 
-  function readLayoutSizes(): LayoutSizes {
-    if (typeof localStorage === "undefined") {
-      return { ...DEFAULT_LAYOUT_SIZES };
-    }
-    try {
-      const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (!raw) return { ...DEFAULT_LAYOUT_SIZES };
-      const parsed = JSON.parse(raw) as Partial<LayoutSizes> & { bottomTracePct?: number };
-      const next = { ...DEFAULT_LAYOUT_SIZES };
-      if (typeof parsed.mainPct === "number" && Number.isFinite(parsed.mainPct)) {
-        next.mainPct = clamp(parsed.mainPct, 42, 74);
-      }
-      if (typeof parsed.sidebarPx === "number" && Number.isFinite(parsed.sidebarPx)) {
-        next.sidebarPx = clamp(parsed.sidebarPx, 260, 420);
-      }
-      if (typeof parsed.disasmPct === "number" && Number.isFinite(parsed.disasmPct)) {
-        next.disasmPct = clamp(parsed.disasmPct, 36, 64);
-      }
-      return next;
-    } catch {
-      return { ...DEFAULT_LAYOUT_SIZES };
-    }
-  }
+  type ResizeOp =
+    | { kind: "main-bottom" }
+    | { kind: "sidebar-main" }
+    | { kind: "disasm-asm" }
+    | { kind: "center-video" }
+    | { kind: "group"; group: "bottom" | "sidebarRows"; a: string; b: string; axis: "x" | "y" };
 
-  function persistLayoutSizes(sizes: LayoutSizes = layoutSizes): void {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(sizes));
-  }
-
-  function updateLayoutSizes(patch: Partial<LayoutSizes>): void {
-    const next = { ...layoutSizes, ...patch };
-    layoutSizes = next;
-    persistLayoutSizes(next);
-  }
-
-  let layoutSizes = $state<LayoutSizes>(readLayoutSizes());
-  let activeResize = $state<ResizeTarget | null>(null);
+  let activeResize = $state<ResizeOp | null>(null);
+  let lastPointer = $state({ x: 0, y: 0 });
   let contentSplit: HTMLDivElement | undefined = $state();
   let workspaceSplit: HTMLElement | undefined = $state();
   let mainColumns: HTMLDivElement | undefined = $state();
-  let bottomPanels: HTMLDivElement | undefined = $state();
+  let bottomPanelsEl: HTMLDivElement | undefined = $state();
+  let sidebarEl: HTMLElement | undefined = $state();
 
   let layoutStyle = $derived(
-    `--main-pct: ${layoutSizes.mainPct}%; --sidebar-px: ${layoutSizes.sidebarPx}px; --disasm-pct: ${layoutSizes.disasmPct}%;`
+    `--main-pct: ${$layout.sizes.mainPct}%; --sidebar-px: ${$layout.sizes.sidebarPx}px; --disasm-pct: ${$layout.sizes.disasmPct}%; --video-px: ${$layout.sizes.videoPx}px;`
   );
 
-  let activeBottomTab = $state("memory");
-  let showOnboarding = $state(
-    typeof localStorage !== "undefined" &&
-      localStorage.getItem("onboardingDismissed") !== "true"
-  );
   let machineProfiles = $state<MachineInfo[]>([]);
   let machineState = $state<MachineState>({
     kind: "bare",
@@ -175,30 +145,71 @@ start   LDA  #$42
   let aciaEnabled = $state(false);
   let videoFrame = $state<VideoFrame | null>(null);
   let aciaTerminal = $state<AciaTerminalState | null>(null);
-  let showVideoModal = $state(false);
   let machineChanging = $state(false);
 
-  const mainTabs = $derived([
-    { id: "disasm", label: $t("disasm.title") },
-    { id: "asm", label: $t("asm.title") },
-    { id: "registers", label: $t("registers.title") },
-  ]);
+  // ---- Derived panel visibility / stacks ----
+
+  let sidebarItems = $derived.by(() => {
+    const items: { id: SidebarSection; share: number; collapsed: boolean }[] = [];
+    if ($layout.visible.registers)
+      items.push({ id: "registers", share: $layout.sizes.sidebarRows.registers, collapsed: $layout.collapsed.registers });
+    if ($layout.visible.io)
+      items.push({ id: "io", share: $layout.sizes.sidebarRows.io, collapsed: $layout.collapsed.io });
+    if ($layout.visible.breakpoints)
+      items.push({ id: "breakpoints", share: $layout.sizes.sidebarRows.breakpoints, collapsed: $layout.collapsed.breakpoints });
+    if ($layout.visible.watchpoints)
+      items.push({ id: "watchpoints", share: $layout.sizes.sidebarRows.watchpoints, collapsed: $layout.collapsed.watchpoints });
+    return items;
+  });
+  let sidebarVisible = $derived(sidebarItems.length > 0);
+
+  let bottomItems = $derived.by(() => {
+    const items: { id: "memory" | "trace" | "terminal"; share: number }[] = [];
+    if ($layout.visible.memory) items.push({ id: "memory", share: $layout.sizes.bottom.memory });
+    if ($layout.visible.trace) items.push({ id: "trace", share: $layout.sizes.bottom.trace });
+    if ($layout.visible.terminal && aciaEnabled) items.push({ id: "terminal", share: $layout.sizes.bottom.terminal });
+    return items;
+  });
+  let bottomVisible = $derived(bottomItems.length > 0);
+
+  let videoDockedVisible = $derived(
+    $layout.visible.video && $layout.videoDocked && machineState.kind !== "bare"
+  );
+
+  let disasmVisible = $derived($layout.visible.disasm);
+  let asmVisible = $derived($layout.visible.asm);
+
+  // ---- Compact tabs (filtered by visibility) ----
+
+  const mainTabs = $derived(
+    [
+      { id: "disasm", label: $t("disasm.title"), show: $layout.visible.disasm },
+      { id: "asm", label: $t("asm.title"), show: $layout.visible.asm },
+      { id: "registers", label: $t("registers.title"), show: $layout.visible.registers },
+      { id: "io", label: $t("machine.ioTitle"), show: $layout.visible.io },
+    ].filter((x) => x.show)
+  );
 
   const bottomTabs = $derived(
-    compactLayout
-      ? [
-          { id: "memory", label: $t("memory.title") },
-          { id: "trace", label: $t("trace.title") },
-          ...(aciaEnabled
-            ? [{ id: "terminal", label: $t("acia.title") }]
-            : []),
-          { id: "debug", label: $t("tabs.debug") },
-        ]
-      : [
-          { id: "memory", label: $t("memory.title") },
-          { id: "trace", label: $t("trace.title") },
-        ]
+    [
+      { id: "memory", label: $t("memory.title"), show: $layout.visible.memory },
+      { id: "trace", label: $t("trace.title"), show: $layout.visible.trace },
+      { id: "terminal", label: $t("acia.title"), show: $layout.visible.terminal && aciaEnabled },
+      { id: "breakpoints", label: $t("breakpoints.title"), show: $layout.visible.breakpoints },
+      { id: "watchpoints", label: $t("watchpoints.title"), show: $layout.visible.watchpoints },
+    ].filter((x) => x.show)
   );
+
+  $effect(() => {
+    if (compactLayout && !mainTabs.some((x) => x.id === activeMainTab)) {
+      activeMainTab = mainTabs[0]?.id ?? "disasm";
+    }
+  });
+  $effect(() => {
+    if (compactLayout && !bottomTabs.some((x) => x.id === activeBottomTab)) {
+      activeBottomTab = bottomTabs[0]?.id ?? "memory";
+    }
+  });
 
   function translate(key: string) {
     return get(t)(key);
@@ -573,6 +584,11 @@ start   LDA  #$42
     localStorage.setItem("onboardingDismissed", "true");
   }
 
+  let showOnboarding = $state(
+    typeof localStorage !== "undefined" &&
+      localStorage.getItem("onboardingDismissed") !== "true"
+  );
+
   async function handleToggleBreakpoint(addr: number) {
     await withBusy(async () => {
       if (breakpoints.has(addr)) {
@@ -793,6 +809,7 @@ start   LDA  #$42
         aciaEnabled = machineState.acia.enabled;
         if (kind === "bare") {
           showVideoModal = false;
+          setPanel("video", false);
         }
 
         breakpoints = new Set();
@@ -810,67 +827,81 @@ start   LDA  #$42
     });
   }
 
-  $effect(() => {
-    localStorage.setItem("memoryFollowPc", String(memoryFollowPc));
-  });
+  // ---- Layout actions ----
 
-  let resizeListenersAttached = false;
+  function handleToggleVideo() {
+    if (machineState.kind === "bare") {
+      showToast(translate("machine.videoEmpty"), "info");
+      return;
+    }
+    togglePanel("video");
+  }
 
-  function applyResize(target: ResizeTarget, clientX: number, clientY: number): void {
+  function handleVideoFullscreen() {
+    showVideoModal = true;
+  }
+
+  function handleVideoDockClose() {
+    setPanel("video", false);
+  }
+
+  function handleResetLayout() {
+    layout.set(defaultLayoutState());
+  }
+
+  function handlePanelClose(id: PanelId) {
+    setPanel(id, false);
+  }
+
+  // ---- Resize engine ----
+
+  function applyResize(op: ResizeOp, clientX: number, clientY: number): void {
     const L = LAYOUT_LIMITS;
-    if (target === "main-bottom" && contentSplit) {
+    const sizes = getLayout().sizes;
+    if (op.kind === "main-bottom" && contentSplit) {
       const rect = contentSplit.getBoundingClientRect();
       const y = clientY - rect.top;
       const minMain = L.mainMinPx;
       const maxMain = rect.height - L.splitterPx - L.bottomMinPx;
       if (maxMain < minMain) return;
-      const mainPx = clamp(y, minMain, maxMain);
-      const mainPct = (mainPx / rect.height) * 100;
-      updateLayoutSizes({ mainPct });
+      const mainPct = (clamp(y, minMain, maxMain) / rect.height) * 100;
+      patchSizes({ mainPct });
       return;
     }
-    if (target === "sidebar-main" && workspaceSplit) {
+    if (op.kind === "sidebar-main" && workspaceSplit) {
       const rect = workspaceSplit.getBoundingClientRect();
       const x = clientX - rect.left;
-      const maxSidebar = Math.min(
-        L.sidebarMaxPx,
-        rect.width - L.splitterPx - L.disasmMinPx - L.asmMinPx
-      );
+      const hasVideo = videoDockedVisible;
+      const reserved = L.splitterPx + (hasVideo ? L.splitterPx + L.videoMinPx : 0);
+      const maxSidebar = Math.min(L.sidebarMaxPx, rect.width - reserved - L.disasmMinPx - L.asmMinPx);
       if (maxSidebar < L.sidebarMinPx) return;
-      const sidebarPx = clamp(x, L.sidebarMinPx, maxSidebar);
-      updateLayoutSizes({ sidebarPx });
+      patchSizes({ sidebarPx: clamp(x, L.sidebarMinPx, maxSidebar) });
       return;
     }
-    if (target === "disasm-asm" && mainColumns) {
+    if (op.kind === "disasm-asm" && mainColumns) {
       const rect = mainColumns.getBoundingClientRect();
       const x = clientX - rect.left;
       const maxDisasm = rect.width - L.splitterPx - L.asmMinPx;
       if (maxDisasm < L.disasmMinPx) return;
-      const disasmPx = clamp(x, L.disasmMinPx, maxDisasm);
-      const disasmPct = (disasmPx / rect.width) * 100;
-      updateLayoutSizes({ disasmPct });
+      const disasmPct = (clamp(x, L.disasmMinPx, maxDisasm) / rect.width) * 100;
+      patchSizes({ disasmPct });
+      return;
+    }
+    if (op.kind === "center-video" && workspaceSplit) {
+      const rect = workspaceSplit.getBoundingClientRect();
+      const videoLeft = rect.right - clientX;
+      const maxVideo = Math.min(L.videoMaxPx, rect.width - L.splitterPx - L.sidebarMinPx - L.disasmMinPx - L.asmMinPx - L.splitterPx);
+      if (maxVideo < L.videoMinPx) return;
+      patchSizes({ videoPx: clamp(videoLeft, L.videoMinPx, maxVideo) });
       return;
     }
   }
 
-  function stopResize(): void {
-    if (!resizeListenersAttached) return;
-    window.removeEventListener("pointermove", onResizePointerMove);
-    window.removeEventListener("pointerup", stopResize);
-    window.removeEventListener("pointercancel", stopResize);
-    resizeListenersAttached = false;
-    activeResize = null;
-  }
-
-  function onResizePointerMove(event: PointerEvent): void {
-    if (!activeResize) return;
-    applyResize(activeResize, event.clientX, event.clientY);
-  }
-
-  function startResize(target: ResizeTarget, event: PointerEvent): void {
+  function startResize(op: ResizeOp, event: PointerEvent): void {
     if (compactLayout) return;
     event.preventDefault();
-    activeResize = target;
+    activeResize = op;
+    lastPointer = { x: event.clientX, y: event.clientY };
     const el = event.currentTarget as HTMLElement | null;
     if (el?.setPointerCapture) {
       try {
@@ -887,61 +918,123 @@ start   LDA  #$42
     }
   }
 
-  function handleSplitterKeydown(target: ResizeTarget, event: KeyboardEvent): void {
-    if (compactLayout) return;
-    const step = event.shiftKey ? 80 : 24;
-    const horizontal =
-      target === "main-bottom";
-    const vertical =
-      target === "sidebar-main" ||
-      target === "disasm-asm";
-    let delta = 0;
-    if (horizontal) {
-      if (event.key === "ArrowDown") delta = step;
-      else if (event.key === "ArrowUp") delta = -step;
-      else return;
-    } else if (vertical) {
-      if (event.key === "ArrowRight") delta = step;
-      else if (event.key === "ArrowLeft") delta = -step;
-      else return;
+  let resizeListenersAttached = false;
+
+  function onResizePointerMove(event: PointerEvent): void {
+    if (!activeResize) return;
+    if (activeResize.kind === "group") {
+      const el = activeResize.group === "bottom" ? bottomPanelsEl : sidebarEl;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const total = activeResize.axis === "x" ? rect.width : rect.height;
+      if (total <= 0) return;
+      const delta = activeResize.axis === "x" ? event.clientX - lastPointer.x : event.clientY - lastPointer.y;
+      lastPointer = { x: event.clientX, y: event.clientY };
+      const deltaPct = (delta / total) * 100;
+      redistribute(activeResize.group, activeResize.a, activeResize.b, deltaPct);
     } else {
+      applyResize(activeResize, event.clientX, event.clientY);
+    }
+  }
+
+  function stopResize(): void {
+    if (!resizeListenersAttached) return;
+    window.removeEventListener("pointermove", onResizePointerMove);
+    window.removeEventListener("pointerup", stopResize);
+    window.removeEventListener("pointercancel", stopResize);
+    resizeListenersAttached = false;
+    activeResize = null;
+  }
+
+  function handleSplitterKeydown(op: ResizeOp, event: KeyboardEvent): void {
+    if (compactLayout) return;
+    const step = event.shiftKey ? 8 : 3;
+    let delta = 0;
+    if (op.kind === "group") {
+      if (op.axis === "x") {
+        if (event.key === "ArrowRight") delta = step;
+        else if (event.key === "ArrowLeft") delta = -step;
+        else return;
+      } else {
+        if (event.key === "ArrowDown") delta = step;
+        else if (event.key === "ArrowUp") delta = -step;
+        else return;
+      }
+      event.preventDefault();
+      redistribute(op.group, op.a, op.b, delta);
       return;
     }
-    event.preventDefault();
-    const L = LAYOUT_LIMITS;
-    if (target === "main-bottom" && contentSplit) {
-      const rect = contentSplit.getBoundingClientRect();
-      const mainPx =
-        (layoutSizes.mainPct / 100) * rect.height + delta;
-      const minMain = L.mainMinPx;
-      const maxMain = rect.height - L.splitterPx - L.bottomMinPx;
+    // pixel/percent based
+    const pxStep = event.shiftKey ? 80 : 24;
+    if (op.kind === "main-bottom") {
+      if (event.key === "ArrowDown") delta = pxStep;
+      else if (event.key === "ArrowUp") delta = -pxStep;
+      else return;
+      event.preventDefault();
+      const rect = contentSplit?.getBoundingClientRect();
+      if (!rect) return;
+      const sizes = getLayout().sizes;
+      const mainPx = (sizes.mainPct / 100) * rect.height + delta;
+      const minMain = LAYOUT_LIMITS.mainMinPx;
+      const maxMain = rect.height - LAYOUT_LIMITS.splitterPx - LAYOUT_LIMITS.bottomMinPx;
       if (maxMain < minMain) return;
-      const clamped = clamp(mainPx, minMain, maxMain);
-      updateLayoutSizes({ mainPct: (clamped / rect.height) * 100 });
+      patchSizes({ mainPct: (clamp(mainPx, minMain, maxMain) / rect.height) * 100 });
       return;
     }
-    if (target === "sidebar-main" && workspaceSplit) {
-      const next = layoutSizes.sidebarPx + delta;
-      const rect = workspaceSplit.getBoundingClientRect();
-      const maxSidebar = Math.min(
-        L.sidebarMaxPx,
-        rect.width - L.splitterPx - L.disasmMinPx - L.asmMinPx
-      );
-      if (maxSidebar < L.sidebarMinPx) return;
-      updateLayoutSizes({ sidebarPx: clamp(next, L.sidebarMinPx, maxSidebar) });
+    if (op.kind === "sidebar-main") {
+      if (event.key === "ArrowRight") delta = pxStep;
+      else if (event.key === "ArrowLeft") delta = -pxStep;
+      else return;
+      event.preventDefault();
+      const sizes = getLayout().sizes;
+      patchSizes({ sidebarPx: clamp(sizes.sidebarPx + delta, LAYOUT_LIMITS.sidebarMinPx, LAYOUT_LIMITS.sidebarMaxPx) });
       return;
     }
-    if (target === "disasm-asm" && mainColumns) {
-      const rect = mainColumns.getBoundingClientRect();
-      const disasmPx =
-        (layoutSizes.disasmPct / 100) * rect.width + delta;
-      const maxDisasm = rect.width - L.splitterPx - L.asmMinPx;
-      if (maxDisasm < L.disasmMinPx) return;
-      const clamped = clamp(disasmPx, L.disasmMinPx, maxDisasm);
-      updateLayoutSizes({ disasmPct: (clamped / rect.width) * 100 });
+    if (op.kind === "disasm-asm") {
+      if (event.key === "ArrowRight") delta = pxStep;
+      else if (event.key === "ArrowLeft") delta = -pxStep;
+      else return;
+      event.preventDefault();
+      const rect = mainColumns?.getBoundingClientRect();
+      if (!rect) return;
+      const sizes = getLayout().sizes;
+      const disasmPx = (sizes.disasmPct / 100) * rect.width + delta;
+      const maxDisasm = rect.width - LAYOUT_LIMITS.splitterPx - LAYOUT_LIMITS.asmMinPx;
+      if (maxDisasm < LAYOUT_LIMITS.disasmMinPx) return;
+      patchSizes({ disasmPct: (clamp(disasmPx, LAYOUT_LIMITS.disasmMinPx, maxDisasm) / rect.width) * 100 });
+      return;
+    }
+    if (op.kind === "center-video") {
+      if (event.key === "ArrowLeft") delta = pxStep;
+      else if (event.key === "ArrowRight") delta = -pxStep;
+      else return;
+      event.preventDefault();
+      const sizes = getLayout().sizes;
+      patchSizes({ videoPx: clamp(sizes.videoPx + delta, LAYOUT_LIMITS.videoMinPx, LAYOUT_LIMITS.videoMaxPx) });
       return;
     }
   }
+
+  // ---- Status bar derived ----
+
+  const pendingText = $derived.by(() => {
+    if (!cpu) return null;
+    const parts: string[] = [];
+    if (cpu.irq_pending) parts.push("IRQ");
+    if (cpu.firq_pending) parts.push("FIRQ");
+    if (cpu.nmi_pending) parts.push("NMI");
+    return parts.length ? parts.join(" ") : null;
+  });
+
+  const cpuLabel = $derived(cpu?.variant === "hd6309" ? $t("cpu.hd6309") : $t("cpu.mc6809"));
+  const machineLabel = $derived(
+    machineState.kind === "coco2" ? $t("machine.coco2") : machineState.kind === "dragon32" ? $t("machine.dragon32") : $t("machine.bare"),
+  );
+  const trapText = $derived(!running && lastTrap ? trapLabel(lastTrap) : null);
+
+  $effect(() => {
+    localStorage.setItem("memoryFollowPc", String(memoryFollowPc));
+  });
 
   onMount(() => {
     const mq = window.matchMedia("(max-width: 1200px)");
@@ -950,13 +1043,6 @@ start   LDA  #$42
       compactLayout = e.matches;
     };
     mq.addEventListener("change", onResize);
-
-    const narrowMq = window.matchMedia("(max-width: 700px)");
-    narrowLayout = narrowMq.matches;
-    const onNarrowResize = (e: MediaQueryListEvent) => {
-      narrowLayout = e.matches;
-    };
-    narrowMq.addEventListener("change", onNarrowResize);
 
     let unlistenTick: (() => void) | undefined;
     let unlistenStopped: (() => void) | undefined;
@@ -1006,12 +1092,18 @@ start   LDA  #$42
         void refresh();
       });
     })().catch(() => {});
+
     const unregisterShortcuts = registerShortcuts([
       { key: "F5", handler: () => { if (busy) return; void handleRun(); } },
       { key: "F5", shift: true, handler: () => { if (busy) return; void handlePause(); } },
       { key: "F10", handler: () => { if (busy) return; void handleStep(); } },
       { key: "F5", ctrl: true, shift: true, handler: () => { if (busy) return; void handleReset(); } },
       { key: "F9", handler: () => { if (busy) return; void handleToggleBreakpointAtPc(); } },
+      { key: "v", handler: () => handleToggleVideo() },
+      { key: "t", handler: () => cycleTheme() },
+      { key: "l", handler: () => toggleLocale() },
+      { key: "?", shift: true, handler: () => { showShortcuts = !showShortcuts; } },
+      { key: "Escape", handler: () => { if (showShortcuts) showShortcuts = false; } },
     ]);
 
     return () => {
@@ -1022,7 +1114,6 @@ start   LDA  #$42
       unlistenStopped?.();
       unregisterShortcuts();
       mq.removeEventListener("change", onResize);
-      narrowMq.removeEventListener("change", onNarrowResize);
     };
   });
 </script>
@@ -1032,233 +1123,44 @@ start   LDA  #$42
     <OnboardingBanner onDismiss={dismissOnboarding} />
   {/if}
 
-  <header class="toolbar" class:toolbar-narrow={narrowLayout}>
-    <div class="brand">
-      <span class="logo">6809</span>
-      <span class="title">{$t("app.title")}</span>
-    </div>
-
-    <div class="controls">
-      <button
-        class="primary btn-icon"
-        onclick={handleRun}
-        disabled={running || busy}
-        aria-label={$t("shortcuts.run")}
-        title={$t("shortcuts.run")}
-      ><Icon name="run" />{$t("toolbar.run")}</button>
-      <button
-        class="btn-icon"
-        onclick={handlePause}
-        disabled={!running}
-        aria-label={$t("shortcuts.pause")}
-        title={$t("shortcuts.pause")}
-      ><Icon name="pause" />{$t("toolbar.pause")}</button>
-      <button
-        class="btn-icon"
-        onclick={handleStep}
-        disabled={running || busy}
-        aria-label={$t("shortcuts.step")}
-        title={$t("shortcuts.step")}
-      ><Icon name="step" />{$t("toolbar.step")}</button>
-      <button
-        class="btn-icon"
-        onclick={handleReset}
-        disabled={busy}
-        aria-label={$t("shortcuts.reset")}
-        title={$t("shortcuts.reset")}
-      ><Icon name="reset" />{$t("toolbar.reset")}</button>
-      <span class="divider"></span>
-      <button
-        onclick={() => handleInterrupt("irq")}
-        disabled={running}
-        title={$t("interrupts.irq")}
-        class:narrow-hide={narrowLayout}
-      >{$t("interrupts.irq")}</button>
-      <button
-        onclick={() => handleInterrupt("firq")}
-        disabled={running}
-        title={$t("interrupts.firq")}
-        class:narrow-hide={narrowLayout}
-      >{$t("interrupts.firq")}</button>
-      <button
-        onclick={() => handleInterrupt("nmi")}
-        disabled={running}
-        title={$t("interrupts.nmi")}
-        class:narrow-hide={narrowLayout}
-      >{$t("interrupts.nmi")}</button>
-      {#if machineState.kind !== "bare"}
-        <button
-          class="btn-icon"
-          onclick={() => (showVideoModal = true)}
-          title={$t("machine.videoOpen")}
-          aria-label={$t("machine.videoOpen")}
-        >{$t("machine.videoTitle")}</button>
-      {/if}
-
-      <span class="divider"></span>
-      <button
-        class="btn-icon"
-        onclick={handleImport}
-        disabled={busy}
-        aria-label={$t("shortcuts.import")}
-        title={$t("shortcuts.import")}
-      ><Icon name="import" />{$t("toolbar.import")}</button>
-      <button
-        class="btn-icon"
-        onclick={handleExport}
-        disabled={busy}
-        aria-label={$t("shortcuts.export")}
-        title={$t("shortcuts.export")}
-      ><Icon name="export" />{$t("toolbar.export")}</button>
-      <span class="divider"></span>
-      <button onclick={handleSaveSession} class:narrow-hide={narrowLayout}>{$t("session.save")}</button>
-      <button onclick={handleLoadSession} class:narrow-hide={narrowLayout}>{$t("session.load")}</button>
-    </div>
-
-    <div class="status-bar">
-      {#if cpu}
-        <span class="status-item">
-          {$t("status.pc")}: <strong class="mono accent">${cpu.pc.toString(16).toUpperCase().padStart(4, "0")}</strong>
-        </span>
-        <span class="status-item">
-          {$t("status.cycles")}: <strong class="mono">{cpu.total_cycles.toLocaleString()}</strong>
-        </span>
-        <span class="status-item">
-          {#if running}
-            <span class="pulse">●</span> {$t("status.running")}
-          {:else}
-            {$t("status.halted")}: {cpu.halted ? $t("status.yes") : $t("status.no")}
-          {/if}
-        </span>
-        {#if cpu.irq_pending || cpu.firq_pending || cpu.nmi_pending}
-          <span class="status-item pending">
-            {$t("interrupts.pending")}:
-            {#if cpu.irq_pending}IRQ{/if}
-            {#if cpu.firq_pending}{cpu.irq_pending ? " " : ""}FIRQ{/if}
-            {#if cpu.nmi_pending}{(cpu.irq_pending || cpu.firq_pending) ? " " : ""}NMI{/if}
-          </span>
-        {/if}
-        {#if lastTrap && !running}
-          <span class="status-item trap">
-            {$t("status.trap")}: {trapLabel(lastTrap)}
-          </span>
-        {/if}
-      {/if}
-      <button class="theme-btn" onclick={cycleTheme} title={$t("theme.label")} aria-label={$t("theme.label")}>
-        {#if $theme === "dark"}{$t("theme.dark")}{:else if $theme === "light"}{$t("theme.light")}{:else}{$t("theme.highContrast")}{/if}
-      </button>
-      <label class="speed-control" class:narrow-hide={narrowLayout}>
-        {$t("speed.label")}:
-        <select
-          value={runSpeedIndex}
-          onchange={(e) => handleSpeedChange(parseInt((e.target as HTMLSelectElement).value, 10))}
-        >
-          {#each api.RUN_SPEED_PRESETS as preset, i}
-            <option value={i}>{preset.label}</option>
-          {/each}
-        </select>
-      </label>
-      <button class="locale-btn" onclick={toggleLocale} aria-label="Language">
-        {$locale === "de" ? "DE" : "EN"}
-      </button>
-    </div>
-  </header>
-
-  <div class="config-bar" class:dirty={configDirty}>
-    <label>
-      {$t("cpu.label")}:
-      <select
-        value={cpu?.variant ?? "mc6809"}
-        disabled={running}
-        onchange={(e) => handleCpuVariantChange((e.target as HTMLSelectElement).value as CpuVariant)}
-      >
-        <option value="mc6809">{$t("cpu.mc6809")}</option>
-        <option value="hd6309">{$t("cpu.hd6309")}</option>
-      </select>
-    </label>
-    <label>
-      {$t("machine.label")}:
-      <select
-        value={machineState.kind}
-        disabled={running || machineChanging}
-        onchange={(e) => handleMachineChange((e.target as HTMLSelectElement).value as MachineKind)}
-      >
-        {#each machineProfiles as profile}
-          <option value={profile.kind}>{profile.name}</option>
-        {/each}
-      </select>
-    </label>
-    <label>
-      {$t("config.loadAddr")}:
-      <input
-        class="mono"
-        value={loadAddr.toString(16).toUpperCase()}
-        oninput={(e) => {
-          const v = parseInt((e.target as HTMLInputElement).value, 16);
-          if (!isNaN(v)) loadAddr = v;
-        }}
-        size="6"
-      />
-    </label>
-    <label>
-      {$t("config.resetPc")}:
-      <input
-        class="mono"
-        value={resetPc.toString(16).toUpperCase()}
-        oninput={(e) => {
-          const v = parseInt((e.target as HTMLInputElement).value, 16);
-          if (!isNaN(v)) resetPc = v;
-        }}
-        size="6"
-      />
-    </label>
-    <button onclick={handleApplyConfig}>{$t("config.apply")}</button>
-    <span class="divider-inline"></span>
-    <label class="acia-toggle">
-      <input
-        type="checkbox"
-        checked={aciaEnabled}
-        disabled={running}
-        onchange={(e) =>
-          void handleAciaConfigChange({ enabled: (e.target as HTMLInputElement).checked })}
-      />
-      {$t("acia.enabled")}
-    </label>
-    {#if aciaEnabled}
-      <label>
-        {$t("acia.baseAddr")}:
-        <input
-          class="mono"
-          value={machineState.acia.base_addr.toString(16).toUpperCase()}
-          disabled={running}
-          onchange={(e) => {
-            const v = parseInt((e.target as HTMLInputElement).value, 16);
-            if (!isNaN(v)) void handleAciaConfigChange({ base_addr: v });
-          }}
-          size="6"
-        />
-      </label>
-      <label>
-        {$t("acia.baud")}:
-        <select
-          value={machineState.acia.baud}
-          disabled={running}
-          onchange={(e) =>
-            void handleAciaConfigChange({
-              baud: parseInt((e.target as HTMLSelectElement).value, 10),
-            })}
-        >
-          <option value={300}>300</option>
-          <option value={1200}>1200</option>
-          <option value={2400}>2400</option>
-          <option value={4800}>4800</option>
-          <option value={9600}>9600</option>
-          <option value={19200}>19200</option>
-          <option value={38400}>38400</option>
-        </select>
-      </label>
-    {/if}
-  </div>
+  <AppHeader
+    {running}
+    {busy}
+    onRun={handleRun}
+    onPause={handlePause}
+    onStep={handleStep}
+    onReset={handleReset}
+    onInterrupt={handleInterrupt}
+    onImport={handleImport}
+    onExport={handleExport}
+    onSaveSession={handleSaveSession}
+    onLoadSession={handleLoadSession}
+    cpuVariant={cpu?.variant ?? "mc6809"}
+    onCpuVariantChange={handleCpuVariantChange}
+    machineKind={machineState.kind}
+    {machineProfiles}
+    onMachineChange={handleMachineChange}
+    {machineChanging}
+    {loadAddr}
+    {resetPc}
+    onLoadAddrChange={(v) => (loadAddr = v)}
+    onResetPcChange={(v) => (resetPc = v)}
+    {configDirty}
+    onApplyConfig={handleApplyConfig}
+    {aciaEnabled}
+    onAciaToggle={(enabled) => void handleAciaConfigChange({ enabled })}
+    aciaBase={machineState.acia.base_addr}
+    onAciaBaseChange={(v) => void handleAciaConfigChange({ base_addr: v })}
+    aciaBaud={machineState.acia.baud}
+    onAciaBaudChange={(v) => void handleAciaConfigChange({ baud: v })}
+    onCycleTheme={cycleTheme}
+    onToggleLocale={toggleLocale}
+    videoAvailable={machineState.kind !== "bare"}
+    videoActive={$layout.visible.video}
+    onToggleVideo={handleToggleVideo}
+    onOpenShortcuts={() => (showShortcuts = true)}
+    onResetLayout={handleResetLayout}
+  />
 
   <div
     class="content-split"
@@ -1267,169 +1169,319 @@ start   LDA  #$42
     bind:this={contentSplit}
     style={layoutStyle}
   >
-  <main class="workspace" class:compact={compactLayout} bind:this={workspaceSplit}>
-    {#if compactLayout}
-      <TabBar tabs={mainTabs} active={activeMainTab} onSelect={(id) => (activeMainTab = id)} />
-    {/if}
-
-    <aside class="sidebar" class:tab-hidden={compactLayout && activeMainTab !== "registers"}>
-      <RegisterPanel
-        {cpu}
-        onSetRegister={handleSetRegister}
-        onToggleFlag={handleToggleFlag}
-      />
-      <IoPanel
-        kind={machineState.kind}
-        registers={machineState.io_registers}
-        onGoto={handleMemoryGoto}
-        onWrite={handleIoWrite}
-      />
-      {#if !compactLayout}
-        <div class="debug-stack">
-          <BreakpointList
-            entries={breakpointEntries}
-            onRemove={handleToggleBreakpoint}
-            onClearAll={handleClearAllBreakpoints}
-            onGoto={handleBreakpointGoto}
-          />
-          <WatchpointList
-            addresses={[...watchpoints].sort((a, b) => a - b)}
-            onRemove={handleToggleWatchpoint}
-            onClearAll={handleClearAllWatchpoints}
-            onGoto={handleWatchpointGoto}
-          />
-        </div>
+    <main
+      class="workspace"
+      class:compact={compactLayout}
+      class:has-sidebar={sidebarVisible && !compactLayout}
+      class:has-video={videoDockedVisible && !compactLayout}
+      bind:this={workspaceSplit}
+    >
+      {#if compactLayout}
+        <TabBar tabs={mainTabs} active={activeMainTab} onSelect={(id) => (activeMainTab = id)} />
       {/if}
-    </aside>
 
-    {#if !compactLayout}
-      <Splitter
-        orientation="vertical"
-        label={$t("layout.resizeSidebar")}
-        valueNow={layoutSizes.sidebarPx}
-        valueMin={LAYOUT_LIMITS.sidebarMinPx}
-        valueMax={LAYOUT_LIMITS.sidebarMaxPx}
-        active={activeResize === "sidebar-main"}
-        onPointerDown={(e) => startResize("sidebar-main", e)}
-        onKeydown={(e) => handleSplitterKeydown("sidebar-main", e)}
-      />
-    {/if}
+      {#if !compactLayout && sidebarVisible}
+        <aside class="sidebar" bind:this={sidebarEl}>
+          {#each sidebarItems as item, i}
+            {#if i > 0 && !sidebarItems[i - 1].collapsed && !item.collapsed}
+              <Splitter
+                orientation="horizontal"
+                label={$t("layout.resizeSidebar")}
+                valueNow={item.share}
+                valueMin={8}
+                valueMax={80}
+                active={activeResize?.kind === "group" && activeResize.group === "sidebarRows"}
+                onPointerDown={(e) => startResize({ kind: "group", group: "sidebarRows", a: sidebarItems[i - 1].id, b: item.id, axis: "y" }, e)}
+                onKeydown={(e) => handleSplitterKeydown({ kind: "group", group: "sidebarRows", a: sidebarItems[i - 1].id, b: item.id, axis: "y" }, e)}
+              />
+            {/if}
+            <section
+              class="side-section"
+              class:collapsed={item.collapsed}
+              style={item.collapsed ? "flex: 0 0 auto" : `flex: ${item.share} 1 0`}
+            >
+              {#if item.id === "registers"}
+                <RegisterPanel
+                  {cpu}
+                  collapsed={item.collapsed}
+                  onToggleCollapse={() => toggleCollapsed("registers")}
+                  onSetRegister={handleSetRegister}
+                  onToggleFlag={handleToggleFlag}
+                />
+              {:else if item.id === "io"}
+                <IoPanel
+                  kind={machineState.kind}
+                  registers={machineState.io_registers}
+                  collapsed={item.collapsed}
+                  onToggleCollapse={() => toggleCollapsed("io")}
+                  onGoto={handleMemoryGoto}
+                  onWrite={handleIoWrite}
+                />
+              {:else if item.id === "breakpoints"}
+                <BreakpointList
+                  entries={breakpointEntries}
+                  collapsed={item.collapsed}
+                  onToggleCollapse={() => toggleCollapsed("breakpoints")}
+                  onRemove={handleToggleBreakpoint}
+                  onClearAll={handleClearAllBreakpoints}
+                  onGoto={handleBreakpointGoto}
+                />
+              {:else if item.id === "watchpoints"}
+                <WatchpointList
+                  addresses={[...watchpoints].sort((a, b) => a - b)}
+                  collapsed={item.collapsed}
+                  onToggleCollapse={() => toggleCollapsed("watchpoints")}
+                  onRemove={handleToggleWatchpoint}
+                  onClearAll={handleClearAllWatchpoints}
+                  onGoto={handleWatchpointGoto}
+                />
+              {/if}
+            </section>
+          {/each}
+        </aside>
+      {/if}
 
-    <div class="main-columns" bind:this={mainColumns} class:tab-hidden={compactLayout && activeMainTab !== "disasm" && activeMainTab !== "asm"}>
-      <section class="center" class:tab-hidden={compactLayout && activeMainTab !== "disasm"}>
-        <DisasmPanel
-          lines={disasmLines}
-          pc={cpu?.pc ?? 0}
-          {running}
-          {breakpoints}
-          onToggleBreakpoint={handleToggleBreakpoint}
-          onSetPc={handleSetPc}
-          onRunTo={handleRunTo}
-        />
-      </section>
-      {#if !compactLayout}
+      {#if !compactLayout && sidebarVisible}
         <Splitter
           orientation="vertical"
-          label={$t("layout.resizeDisasmAsm")}
-          valueNow={layoutSizes.disasmPct}
-          valueMin={36}
-          valueMax={64}
-          active={activeResize === "disasm-asm"}
-          onPointerDown={(e) => startResize("disasm-asm", e)}
-          onKeydown={(e) => handleSplitterKeydown("disasm-asm", e)}
+          label={$t("layout.resizeSidebar")}
+          valueNow={$layout.sizes.sidebarPx}
+          valueMin={LAYOUT_LIMITS.sidebarMinPx}
+          valueMax={LAYOUT_LIMITS.sidebarMaxPx}
+          active={activeResize?.kind === "sidebar-main"}
+          onPointerDown={(e) => startResize({ kind: "sidebar-main" }, e)}
+          onKeydown={(e) => handleSplitterKeydown({ kind: "sidebar-main" }, e)}
         />
       {/if}
-      <section class="right" class:tab-hidden={compactLayout && activeMainTab !== "asm"}>
-        <AsmEditor
-          bind:source={asmSource}
-          errors={asmErrors}
-          {assembling}
-          onAssemble={handleAssemble}
-          onLoadExample={handleLoadExample}
+
+      <div
+        class="main-columns"
+        bind:this={mainColumns}
+        class:tab-hidden={compactLayout && activeMainTab !== "disasm" && activeMainTab !== "asm"}
+        class:only-disasm={disasmVisible && !asmVisible && !compactLayout}
+        class:only-asm={!disasmVisible && asmVisible && !compactLayout}
+      >
+        <section class="center" class:tab-hidden={compactLayout && activeMainTab !== "disasm"} class:hidden={!disasmVisible && !compactLayout}>
+          <DisasmPanel
+            lines={disasmLines}
+            pc={cpu?.pc ?? 0}
+            {running}
+            {breakpoints}
+            onToggleBreakpoint={handleToggleBreakpoint}
+            onSetPc={handleSetPc}
+            onRunTo={handleRunTo}
+          />
+        </section>
+        {#if disasmVisible && asmVisible && !compactLayout}
+          <Splitter
+            orientation="vertical"
+            label={$t("layout.resizeDisasmAsm")}
+            valueNow={$layout.sizes.disasmPct}
+            valueMin={30}
+            valueMax={70}
+            active={activeResize?.kind === "disasm-asm"}
+            onPointerDown={(e) => startResize({ kind: "disasm-asm" }, e)}
+            onKeydown={(e) => handleSplitterKeydown({ kind: "disasm-asm" }, e)}
+          />
+        {/if}
+        <section class="right" class:tab-hidden={compactLayout && activeMainTab !== "asm"} class:hidden={!asmVisible && !compactLayout}>
+          <AsmEditor
+            bind:source={asmSource}
+            errors={asmErrors}
+            {assembling}
+            onAssemble={handleAssemble}
+            onLoadExample={handleLoadExample}
+          />
+        </section>
+      </div>
+
+      {#if videoDockedVisible}
+        <Splitter
+          orientation="vertical"
+          label={$t("machine.videoTitle")}
+          valueNow={$layout.sizes.videoPx}
+          valueMin={LAYOUT_LIMITS.videoMinPx}
+          valueMax={LAYOUT_LIMITS.videoMaxPx}
+          active={activeResize?.kind === "center-video"}
+          onPointerDown={(e) => startResize({ kind: "center-video" }, e)}
+          onKeydown={(e) => handleSplitterKeydown({ kind: "center-video" }, e)}
         />
-      </section>
-    </div>
-  </main>
+        <section class="video-dock">
+          <VideoPanel
+            frame={videoFrame}
+            onGoto={handleMemoryGoto}
+            onFullscreen={handleVideoFullscreen}
+            onClose={handleVideoDockClose}
+          />
+        </section>
+      {/if}
 
-  {#if !compactLayout}
-    <Splitter
-      orientation="horizontal"
-      label={$t("layout.resizeMainBottom")}
-      valueNow={layoutSizes.mainPct}
-      valueMin={42}
-      valueMax={74}
-      active={activeResize === "main-bottom"}
-      onPointerDown={(e) => startResize("main-bottom", e)}
-      onKeydown={(e) => handleSplitterKeydown("main-bottom", e)}
-    />
-  {/if}
+      {#if compactLayout}
+        <section class="compact-panel" class:tab-hidden={activeMainTab !== "registers"}>
+          <RegisterPanel
+            {cpu}
+            onSetRegister={handleSetRegister}
+            onToggleFlag={handleToggleFlag}
+          />
+        </section>
+        <section class="compact-panel" class:tab-hidden={activeMainTab !== "io"}>
+          <IoPanel
+            kind={machineState.kind}
+            registers={machineState.io_registers}
+            onGoto={handleMemoryGoto}
+            onWrite={handleIoWrite}
+          />
+        </section>
+      {/if}
+    </main>
 
-  <footer class="bottom" class:compact={compactLayout}>
-    {#if compactLayout}
-      <TabBar tabs={bottomTabs} active={activeBottomTab} onSelect={(id) => (activeBottomTab = id)} />
+    {#if !compactLayout && bottomVisible}
+      <Splitter
+        orientation="horizontal"
+        label={$t("layout.resizeMainBottom")}
+        valueNow={$layout.sizes.mainPct}
+        valueMin={38}
+        valueMax={78}
+        active={activeResize?.kind === "main-bottom"}
+        onPointerDown={(e) => startResize({ kind: "main-bottom" }, e)}
+        onKeydown={(e) => handleSplitterKeydown({ kind: "main-bottom" }, e)}
+      />
     {/if}
 
-    <div
-      class="bottom-panels"
-      class:three-cols={aciaEnabled}
-      bind:this={bottomPanels}
-    >
-      <div class="bottom-cell" class:tab-hidden={compactLayout && activeBottomTab !== "memory"}>
-        <MemoryView
-          address={memoryAddr}
-          bytes={memoryBytes}
-          bind:followPc={memoryFollowPc}
-          {watchpoints}
-          onGoto={handleMemoryGoto}
-          onEdit={handleMemoryEdit}
-          onToggleWatchpoint={handleToggleWatchpoint}
-        />
-      </div>
-      <div class="bottom-cell" class:tab-hidden={compactLayout && activeBottomTab !== "trace"}>
-        <TraceLog
-          entries={trace}
-          maxDisplay={traceMaxDisplay}
-          onMaxDisplayChange={handleTraceDepthChange}
-          onClear={handleClearTrace}
-          onNavigate={handleTraceNavigate}
-        />
-      </div>
-      {#if aciaEnabled}
-        <div class="bottom-cell" class:tab-hidden={compactLayout && activeBottomTab !== "terminal"}>
-          <TerminalPanel
-            terminal={aciaTerminal}
-            baseAddr={machineState.acia.base_addr}
-            onSend={(text) => void handleAciaSend(text)}
-          />
-        </div>
-      {/if}
+    <footer class="bottom" class:compact={compactLayout}>
       {#if compactLayout}
-        <div class="debug-panels" class:tab-hidden={activeBottomTab !== "debug"}>
-          <BreakpointList
-            entries={breakpointEntries}
-            onRemove={handleToggleBreakpoint}
-            onClearAll={handleClearAllBreakpoints}
-            onGoto={handleBreakpointGoto}
-          />
-          <WatchpointList
-            addresses={[...watchpoints].sort((a, b) => a - b)}
-            onRemove={handleToggleWatchpoint}
-            onClearAll={handleClearAllWatchpoints}
-            onGoto={handleWatchpointGoto}
-          />
-        </div>
+        <TabBar tabs={bottomTabs} active={activeBottomTab} onSelect={(id) => (activeBottomTab = id)} />
       {/if}
-    </div>
-  </footer>
+
+      <div class="bottom-panels" bind:this={bottomPanelsEl}>
+        {#if !compactLayout}
+          {#each bottomItems as item, i}
+            {#if i > 0}
+              <Splitter
+                orientation="vertical"
+                label={$t("layout.resizeMainBottom")}
+                valueNow={item.share}
+                valueMin={8}
+                valueMax={80}
+                active={activeResize?.kind === "group" && activeResize.group === "bottom"}
+                onPointerDown={(e) => startResize({ kind: "group", group: "bottom", a: bottomItems[i - 1].id, b: item.id, axis: "x" }, e)}
+                onKeydown={(e) => handleSplitterKeydown({ kind: "group", group: "bottom", a: bottomItems[i - 1].id, b: item.id, axis: "x" }, e)}
+              />
+            {/if}
+            <section class="bottom-cell" style={`flex: ${item.share} 1 0`}>
+              {#if item.id === "memory"}
+                <MemoryView
+                  address={memoryAddr}
+                  bytes={memoryBytes}
+                  bind:followPc={memoryFollowPc}
+                  {watchpoints}
+                  onGoto={handleMemoryGoto}
+                  onEdit={handleMemoryEdit}
+                  onToggleWatchpoint={handleToggleWatchpoint}
+                  onClose={() => handlePanelClose("memory")}
+                />
+              {:else if item.id === "trace"}
+                <TraceLog
+                  entries={trace}
+                  maxDisplay={traceMaxDisplay}
+                  onMaxDisplayChange={handleTraceDepthChange}
+                  onClear={handleClearTrace}
+                  onNavigate={handleTraceNavigate}
+                  onClose={() => handlePanelClose("trace")}
+                />
+              {:else if item.id === "terminal"}
+                <TerminalPanel
+                  terminal={aciaTerminal}
+                  baseAddr={machineState.acia.base_addr}
+                  onSend={(text) => void handleAciaSend(text)}
+                  onClose={() => handlePanelClose("terminal")}
+                />
+              {/if}
+            </section>
+          {/each}
+        {:else}
+          {#each bottomItems as item}
+            <section class="bottom-cell" class:tab-hidden={activeBottomTab !== item.id}>
+              {#if item.id === "memory"}
+                <MemoryView
+                  address={memoryAddr}
+                  bytes={memoryBytes}
+                  bind:followPc={memoryFollowPc}
+                  {watchpoints}
+                  onGoto={handleMemoryGoto}
+                  onEdit={handleMemoryEdit}
+                  onToggleWatchpoint={handleToggleWatchpoint}
+                  onClose={() => handlePanelClose("memory")}
+                />
+              {:else if item.id === "trace"}
+                <TraceLog
+                  entries={trace}
+                  maxDisplay={traceMaxDisplay}
+                  onMaxDisplayChange={handleTraceDepthChange}
+                  onClear={handleClearTrace}
+                  onNavigate={handleTraceNavigate}
+                  onClose={() => handlePanelClose("trace")}
+                />
+              {:else if item.id === "terminal"}
+                <TerminalPanel
+                  terminal={aciaTerminal}
+                  baseAddr={machineState.acia.base_addr}
+                  onSend={(text) => void handleAciaSend(text)}
+                  onClose={() => handlePanelClose("terminal")}
+                />
+              {/if}
+            </section>
+          {/each}
+          {#if $layout.visible.breakpoints}
+            <section class="bottom-cell debug-cell" class:tab-hidden={activeBottomTab !== "breakpoints"}>
+              <BreakpointList
+                entries={breakpointEntries}
+                onRemove={handleToggleBreakpoint}
+                onClearAll={handleClearAllBreakpoints}
+                onGoto={handleBreakpointGoto}
+              />
+            </section>
+          {/if}
+          {#if $layout.visible.watchpoints}
+            <section class="bottom-cell debug-cell" class:tab-hidden={activeBottomTab !== "watchpoints"}>
+              <WatchpointList
+                addresses={[...watchpoints].sort((a, b) => a - b)}
+                onRemove={handleToggleWatchpoint}
+                onClearAll={handleClearAllWatchpoints}
+                onGoto={handleWatchpointGoto}
+              />
+            </section>
+          {/if}
+        {/if}
+      </div>
+    </footer>
   </div>
 
+  <StatusBar
+    {running}
+    halted={cpu?.halted ?? false}
+    {busy}
+    pc={cpu?.pc ?? 0}
+    cycles={cpu?.total_cycles ?? 0}
+    pending={pendingText}
+    trap={trapText}
+    {cpuLabel}
+    {machineLabel}
+    speedIndex={runSpeedIndex}
+    speedPresets={api.RUN_SPEED_PRESETS}
+    onSpeedChange={handleSpeedChange}
+    onOpenShortcuts={() => (showShortcuts = true)}
+  />
 </div>
+
 <VideoModal
   open={showVideoModal}
   frame={videoFrame}
   onClose={() => (showVideoModal = false)}
   onGoto={handleMemoryGoto}
 />
+
+<ShortcutsOverlay open={showShortcuts} onClose={() => (showShortcuts = false)} />
 
 <Toast />
 
@@ -1440,201 +1492,14 @@ start   LDA  #$42
     display: flex;
     flex-direction: column;
     height: 100dvh;
-    padding: 12px;
-    gap: 10px;
+    padding: 8px;
+    gap: 8px;
     min-height: 0;
-  }
-
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 10px 16px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-bottom: 1px solid var(--accent-dim);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    flex-wrap: wrap;
-  }
-
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .logo {
-    font-family: var(--font-mono);
-    font-weight: 700;
-    font-size: 18px;
-    color: var(--accent);
-    text-shadow: 0 0 12px rgba(57, 255, 20, 0.4);
-    padding: 4px 8px;
-    border: 1px solid var(--accent-dim);
-    border-radius: 4px;
-  }
-
-  .title {
-    font-weight: 600;
-    font-size: 15px;
-    color: var(--text);
-  }
-
-  .controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1;
-    flex-wrap: wrap;
-  }
-
-  .divider {
-    width: 1px;
-    height: 24px;
-    background: var(--border);
-    margin: 0 4px;
-  }
-
-  .status-bar {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    font-size: 12px;
-    color: var(--text-dim);
-    flex-wrap: wrap;
-  }
-
-  .status-item strong {
-    color: var(--text);
-  }
-
-  .status-item.pending {
-    color: var(--accent-amber);
-  }
-
-  .status-item.trap {
-    color: var(--danger);
-  }
-
-  .theme-btn {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-
-  .btn-icon {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .speed-control {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-
-  .speed-control select {
-    padding: 2px 6px;
-    font-size: 11px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 4px;
-  }
-
-  .accent {
-    color: var(--accent) !important;
-  }
-
-  .pulse {
-    color: var(--accent);
-    animation: pulse 1.2s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.3;
-    }
-  }
-
-  .locale-btn {
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    min-width: 36px;
-  }
-
-  .config-bar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 6px 12px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    font-size: 12px;
-    color: var(--text-dim);
-    transition: border-color 0.2s;
-    flex-wrap: wrap;
-  }
-
-  .config-bar.dirty {
-    border-color: var(--accent-amber);
-  }
-
-  .config-bar label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .config-bar input,
-  .config-bar select {
-    width: 72px;
-    padding: 4px 6px;
-    font-size: 11px;
-  }
-
-  .divider-inline {
-    width: 1px;
-    height: 20px;
-    background: var(--border);
-    flex-shrink: 0;
-  }
-
-  .acia-toggle {
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .acia-toggle input {
-    width: auto;
-    margin: 0;
-    cursor: pointer;
-  }
-
-  .config-bar select {
-    width: auto;
-    min-width: 120px;
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 4px;
   }
 
   .content-split {
     display: grid;
-    grid-template-rows: minmax(320px, var(--main-pct)) 10px minmax(220px, 1fr);
+    grid-template-rows: minmax(300px, var(--main-pct)) 10px minmax(200px, 1fr);
     flex: 1;
     min-height: 0;
   }
@@ -1651,55 +1516,91 @@ start   LDA  #$42
 
   .workspace {
     display: grid;
-    grid-template-columns: minmax(260px, var(--sidebar-px)) 10px minmax(0, 1fr);
+    grid-template-columns: 10px minmax(0, 1fr);
     gap: 0;
     min-height: 0;
     min-width: 0;
   }
 
+  .workspace.has-sidebar {
+    grid-template-columns: minmax(240px, var(--sidebar-px)) 10px minmax(0, 1fr);
+  }
+
+  .workspace.has-sidebar.has-video {
+    grid-template-columns: minmax(240px, var(--sidebar-px)) 10px minmax(0, 1fr) 10px var(--video-px);
+  }
+
+  .workspace:not(.has-sidebar).has-video {
+    grid-template-columns: minmax(0, 1fr) 10px var(--video-px);
+  }
+
   .sidebar {
-    display: grid;
-    grid-template-rows: max-content minmax(100px, 0.45fr) minmax(180px, 1fr);
-    gap: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
     min-height: 0;
     min-width: 0;
-    padding-right: 5px;
     overflow: hidden;
   }
 
-  .debug-stack {
-    display: grid;
-    grid-template-rows: minmax(90px, 1fr) minmax(90px, 1fr);
-    gap: 10px;
+  .side-section {
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .side-section + .side-section {
+    margin-top: 0;
+  }
+
+  .side-section :global(.panel) {
+    height: 100%;
     min-height: 0;
   }
 
   .main-columns {
     display: grid;
-    grid-template-columns: minmax(300px, var(--disasm-pct)) 10px minmax(300px, 1fr);
+    grid-template-columns: minmax(280px, var(--disasm-pct)) 10px minmax(280px, 1fr);
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .main-columns.only-disasm {
+    grid-template-columns: 1fr;
+  }
+
+  .main-columns.only-asm {
+    grid-template-columns: 1fr;
+  }
+
+  .center,
+  .right,
+  .bottom-cell,
+  .video-dock {
     min-height: 0;
     min-width: 0;
   }
 
   .center,
   .right,
-  .bottom-cell {
-    min-height: 0;
-    min-width: 0;
-  }
-
-  .center,
-  .right {
+  .video-dock {
     display: flex;
     flex-direction: column;
   }
 
-  .center {
-    padding: 0 5px;
+  .center,
+  .right {
+    padding: 0;
   }
 
-  .right {
-    padding-left: 5px;
+  .center.hidden,
+  .right.hidden {
+    display: none;
+  }
+
+  .video-dock {
+    min-width: var(--video-px);
   }
 
   .workspace.compact {
@@ -1707,15 +1608,19 @@ start   LDA  #$42
     flex: 1;
     flex-direction: column;
     min-height: 0;
+    gap: 6px;
   }
 
-  .workspace.compact .sidebar,
-  .workspace.compact .main-columns {
-    display: flex;
+  .workspace.compact .main-columns,
+  .workspace.compact .compact-panel {
     flex: 1;
-    flex-direction: column;
     min-height: 0;
     padding: 0;
+  }
+
+  .workspace.compact .main-columns {
+    display: flex;
+    flex-direction: column;
   }
 
   .workspace.compact .center,
@@ -1731,21 +1636,17 @@ start   LDA  #$42
   .bottom {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
     min-height: 0;
   }
 
   .bottom-panels {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    display: flex;
+    flex-direction: row;
+    gap: 0;
     flex: 1;
     min-height: 0;
     min-width: 0;
-  }
-
-  .bottom-panels.three-cols {
-    grid-template-columns: 1fr 1fr 1fr;
   }
 
   .bottom-cell {
@@ -1753,8 +1654,11 @@ start   LDA  #$42
     flex-direction: column;
     min-height: 0;
     min-width: 0;
-    padding: 0 5px;
     overflow: hidden;
+  }
+
+  .bottom-cell + .bottom-cell {
+    padding-left: 0;
   }
 
   .bottom.compact .bottom-panels {
@@ -1762,56 +1666,15 @@ start   LDA  #$42
     flex-direction: column;
   }
 
-  .debug-panels {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+  .bottom.compact .bottom-cell {
+    flex: 1;
     min-height: 0;
   }
 
-  @media (max-width: 1200px) {
-    /* compactLayout driven by matchMedia in script */
-  }
-
   @media (max-width: 700px) {
-    .toolbar-narrow {
-      gap: 8px;
-      padding: 8px 10px;
-    }
-
-    .toolbar-narrow .controls {
-      gap: 4px;
-    }
-
-    .toolbar-narrow .btn-icon {
-      gap: 2px;
-      padding: 6px 8px;
-      font-size: 11px;
-    }
-
-    .toolbar-narrow .status-bar {
+    .app {
+      padding: 6px;
       gap: 6px;
-      font-size: 10px;
-    }
-
-    .toolbar-narrow .brand .title {
-      display: none;
-    }
-
-    .config-bar {
-      gap: 6px;
-      padding: 4px 8px;
-      font-size: 10px;
-    }
-
-    .config-bar label {
-      gap: 3px;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .config-bar .divider-inline {
-      display: none;
     }
   }
 </style>

@@ -22,7 +22,8 @@
   } = $props();
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   class="splitter"
   class:vertical={orientation === "vertical"}
@@ -96,7 +97,7 @@
   .splitter:focus-visible::before,
   .splitter.active::before {
     background: var(--accent-dim);
-    box-shadow: 0 0 6px rgba(57, 255, 20, 0.25);
+    box-shadow: 0 0 6px var(--accent-line);
   }
 
   .splitter:focus-visible {

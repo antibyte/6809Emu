@@ -2,8 +2,9 @@
   import { onMount } from "svelte";
   import type { EditorView } from "@codemirror/view";
   import { t } from "../i18n";
+  import { theme } from "../theme";
   import { ASM_EXAMPLES } from "../examples";
-  import { createAsmEditor, setAsmEditorDoc } from "../codemirror/create-editor";
+  import { createAsmEditor, setAsmEditorDoc, type AsmEditorHandle } from "../codemirror/create-editor";
 
   let {
     source = $bindable(),
@@ -21,18 +22,27 @@
 
   let editorHost: HTMLDivElement | undefined = $state();
   let editorView: EditorView | undefined = $state();
+  let handle: AsmEditorHandle | undefined = $state();
   let selectedExample = $state("");
 
   onMount(() => {
     if (!editorHost) return;
-    editorView = createAsmEditor({
+    handle = createAsmEditor({
       parent: editorHost,
       doc: source,
+      theme: $theme,
       onChange: (value) => {
         source = value;
       },
+      onAssemble: () => onAssemble(),
     });
-    return () => editorView?.destroy();
+    editorView = handle.view;
+    return () => handle?.view.destroy();
+  });
+
+  $effect(() => {
+    $theme;
+    handle?.setTheme($theme);
   });
 
   $effect(() => {
@@ -133,8 +143,8 @@
 
   .errors {
     margin: 0 12px 12px;
-    background: rgba(255, 71, 87, 0.08);
-    border: 1px solid rgba(255, 71, 87, 0.3);
+    background: var(--danger-soft);
+    border: 1px solid var(--danger-line);
     border-radius: 6px;
     padding: 8px 12px;
     font-size: 12px;

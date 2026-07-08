@@ -1,13 +1,18 @@
 <script lang="ts">
   import { t } from "../i18n";
+  import Icon from "./Icon.svelte";
 
   let {
     entries,
+    collapsed = false,
+    onToggleCollapse,
     onRemove,
     onClearAll,
     onGoto,
   }: {
     entries: { address: number; text: string }[];
+    collapsed?: boolean;
+    onToggleCollapse?: () => void;
     onRemove: (addr: number) => void;
     onClearAll: () => void;
     onGoto: (addr: number) => void;
@@ -18,28 +23,37 @@
   }
 </script>
 
-<div class="panel bp-panel panel-secondary">
+<div class="panel bp-panel panel-secondary" class:collapsed>
   <div class="panel-header">
-    <span>{$t("breakpoints.title")} ({entries.length})</span>
-    {#if entries.length > 0}
-      <button class="clear-btn" onclick={onClearAll}>{$t("breakpoints.clearAll")}</button>
-    {/if}
+    <span class="ph-title">
+      <Icon name="breakpoint" size={12} />
+      {$t("breakpoints.title")}
+      <span class="count">{entries.length}</span>
+    </span>
+    <div class="ph-actions">
+      {#if entries.length > 0}
+        <button class="clear-btn" onclick={onClearAll}>{$t("breakpoints.clearAll")}</button>
+      {/if}
+      {#if onToggleCollapse}
+        <button class="hdr-btn collapse-btn" onclick={onToggleCollapse} title={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-label={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-expanded={!collapsed}>
+          <Icon name="chevron-down" size={13} />
+        </button>
+      {/if}
+    </div>
   </div>
   <div class="panel-body bp-list">
     {#if entries.length === 0}
-      <div class="empty">{$t("breakpoints.empty")}</div>
+      <div class="empty-line"><Icon name="breakpoint" size={12} /> {$t("empty.breakpoints")}</div>
     {:else}
       {#each entries as entry}
         <div class="bp-entry">
           <button class="addr mono" onclick={() => onGoto(entry.address)} title={$t("breakpoints.goto")}>
             {fmtAddr(entry.address)}
           </button>
-          <span class="text mono">{entry.text || "-"}</span>
-          <button
-            class="remove"
-            onclick={() => onRemove(entry.address)}
-            aria-label={$t("breakpoints.remove")}
-          >×</button>
+          <span class="text mono">{entry.text || "—"}</span>
+          <button class="remove" onclick={() => onRemove(entry.address)} aria-label={$t("breakpoints.remove")}>
+            <Icon name="close" size={11} />
+          </button>
         </div>
       {/each}
     {/if}
@@ -50,6 +64,36 @@
   .bp-panel {
     height: 100%;
     min-height: 0;
+  }
+
+  .bp-panel.collapsed .panel-body {
+    display: none;
+  }
+
+  .bp-panel .ph-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .bp-panel .ph-title :global(.icon) {
+    color: var(--danger);
+    margin-right: 0;
+  }
+
+  .count {
+    font-size: 10px;
+    color: var(--text-faint);
+    font-weight: 500;
+  }
+
+  .collapse-btn :global(.icon) {
+    transition: transform var(--motion-normal) var(--ease-tactile);
+    margin-right: 0;
+  }
+
+  .bp-panel.collapsed .collapse-btn :global(.icon) {
+    transform: rotate(-90deg);
   }
 
   .clear-btn {
@@ -66,24 +110,17 @@
     min-height: 0;
   }
 
-  .empty {
-    padding: 12px;
-    color: var(--text-dim);
-    text-align: center;
-    font-size: 11px;
-  }
-
   .bp-entry {
     display: grid;
-    grid-template-columns: 64px 1fr 24px;
+    grid-template-columns: 60px 1fr 20px;
     gap: 6px;
-    padding: 4px 10px;
+    padding: 3px 10px;
     align-items: center;
-    border-bottom: 1px solid rgba(36, 48, 64, 0.5);
+    border-bottom: 1px solid var(--border);
   }
 
   .bp-entry:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--bg-hover);
   }
 
   .addr {
@@ -109,12 +146,13 @@
   }
 
   .remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     padding: 0;
-    font-size: 16px;
-    line-height: 1;
-    color: var(--text-dim);
+    color: var(--text-faint);
     cursor: pointer;
   }
 

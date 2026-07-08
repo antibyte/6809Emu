@@ -22,10 +22,11 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 8px 14px;
-    background: rgba(57, 255, 20, 0.06);
-    border: 1px solid var(--accent-dim);
-    border-radius: var(--radius);
+    padding: 7px 14px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
     font-size: 12px;
     color: var(--text);
   }
@@ -41,6 +42,11 @@
     padding: 4px;
     color: var(--text-dim);
     flex-shrink: 0;
+    display: inline-flex;
+  }
+
+  .dismiss :global(.icon) {
+    margin-right: 0;
   }
 
   .dismiss:hover {
