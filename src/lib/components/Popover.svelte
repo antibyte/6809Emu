@@ -198,4 +198,22 @@
     font-size: 12px;
     padding: 4px 8px;
   }
+
+  @media (max-width: 480px) {
+    .popover {
+      min-width: min(280px, calc(100vw - 24px));
+    }
+    .popover :global(.field) {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 3px;
+    }
+    .popover :global(.field .lk) {
+      font-size: 10px;
+    }
+    .popover :global(.field input),
+    .popover :global(.field select) {
+      width: 100%;
+    }
+  }
 </style>

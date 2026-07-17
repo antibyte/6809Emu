@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "../i18n";
   import Icon from "./Icon.svelte";
+  import { fmtAddr } from "../format";
 
   let {
     running,
@@ -34,7 +35,7 @@
 
   const stateLabel = $derived(running ? $t("statusbar.running") : halted ? $t("statusbar.halted") : $t("statusbar.ready"));
   const stateClass = $derived(running ? "on" : halted ? "danger" : "");
-  const pcHex = $derived(`$${pc.toString(16).toUpperCase().padStart(4, "0")}`);
+  const pcHex = $derived(fmtAddr(pc));
 </script>
 
 <footer class="status-bar">
@@ -69,12 +70,12 @@
 
   <span class="spacer"></span>
 
-  <span class="seg" title={$t("cpu.label")}>
+  <span class="seg narrow-optional" title={$t("cpu.label")}>
     <Icon name="cpu" size={12} />
     <span class="v">{cpuLabel}</span>
   </span>
 
-  <span class="seg" title={$t("machine.label")}>
+  <span class="seg narrow-optional" title={$t("machine.label")}>
     <Icon name="chip" size={12} />
     <span class="v">{machineLabel}</span>
   </span>
@@ -176,6 +177,23 @@
     }
     .seg.speed .k {
       display: inline;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .narrow-optional {
+      display: none;
+    }
+    .status-bar {
+      gap: 6px;
+      padding: 0 8px;
+    }
+  }
+
+  @media (max-width: 400px) {
+    .status-bar {
+      gap: 4px;
+      padding: 0 6px;
     }
   }
 </style>

@@ -1,25 +1,24 @@
 <script lang="ts">
   import { t } from "../i18n";
   import Icon from "./Icon.svelte";
+  import { fmtAddr } from "../format";
   import type { AciaTerminalState } from "../types";
 
   let {
     terminal,
     baseAddr,
     onSend,
+    onClear,
     onClose,
   }: {
     terminal: AciaTerminalState | null;
     baseAddr: number;
     onSend: (text: string) => void;
+    onClear?: () => void;
     onClose?: () => void;
   } = $props();
 
   let inputText = $state("");
-
-  function fmtAddr(a: number) {
-    return `$${a.toString(16).toUpperCase().padStart(4, "0")}`;
-  }
 
   function handleSend() {
     if (!inputText) return;
@@ -43,6 +42,11 @@
         <span class="status mono" class:on={terminal.rdrf} title={$t("acia.rdrf")}>RDRF</span>
         <span class="status mono" class:on={terminal.tdre} title={$t("acia.tdre")}>TDRE</span>
         <span class="status mono" class:on={terminal.irq} title={$t("acia.irq")}>IRQ</span>
+      {/if}
+      {#if onClear}
+        <button class="hdr-btn" onclick={onClear} title={$t("acia.clear")} aria-label={$t("acia.clear")}>
+          <Icon name="clear" size={13} />
+        </button>
       {/if}
       {#if onClose}
         <button class="hdr-btn" onclick={onClose} title={$t("panels.close")} aria-label={$t("panels.close")}>

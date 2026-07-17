@@ -44,6 +44,16 @@
     onToggleVideo,
     onOpenShortcuts,
     onResetLayout,
+    piaEnabled,
+    onPiaToggle,
+    piaBase,
+    onPiaBaseChange,
+    ayEnabled,
+    onAyToggle,
+    ayBase,
+    onAyBaseChange,
+    ayChipClock,
+    onAyChipClockChange,
   }: {
     running: boolean;
     busy: boolean;
@@ -81,6 +91,16 @@
     onToggleVideo: () => void;
     onOpenShortcuts: () => void;
     onResetLayout: () => void;
+    piaEnabled: boolean;
+    onPiaToggle: (enabled: boolean) => void;
+    piaBase: number;
+    onPiaBaseChange: (v: number) => void;
+    ayEnabled: boolean;
+    onAyToggle: (enabled: boolean) => void;
+    ayBase: number;
+    onAyBaseChange: (v: number) => void;
+    ayChipClock: number;
+    onAyChipClockChange: (v: number) => void;
   } = $props();
 
   const themeLabel = $derived(
@@ -91,6 +111,8 @@
   const viewPanels = $derived([
     { id: "registers" as PanelId, icon: "registers" as const, label: $t("registers.title") },
     { id: "io" as PanelId, icon: "io" as const, label: $t("machine.ioTitle") },
+    { id: "pia" as PanelId, icon: "io" as const, label: $t("pia.title") },
+    { id: "ay" as PanelId, icon: "io" as const, label: $t("ay.title") },
     { id: "breakpoints" as PanelId, icon: "breakpoint" as const, label: $t("breakpoints.title") },
     { id: "watchpoints" as PanelId, icon: "watch" as const, label: $t("watchpoints.title") },
     { id: "disasm" as PanelId, icon: "disasm" as const, label: $t("disasm.title") },
@@ -109,6 +131,8 @@
   }
 
   const baudOptions = [300, 1200, 2400, 4800, 9600, 19200, 38400];
+
+  const chipClockPresets = [1_000_000, 1_773_400, 1_996_800, 2_000_000];
 </script>
 
 <header class="app-header">
@@ -181,6 +205,9 @@
             {/each}
           </select>
         </label>
+        {#if machineProfiles.find((p) => p.kind === machineKind)?.description}
+          <p class="hint mono">{machineProfiles.find((p) => p.kind === machineKind)?.description}</p>
+        {/if}
 
         <div class="menu-sep"></div>
         <div class="menu-label">{$t("setup.load")} / {$t("setup.reset")}</div>
@@ -209,6 +236,40 @@
             <select value={aciaBaud} disabled={running} onchange={(e) => onAciaBaudChange(parseInt((e.target as HTMLSelectElement).value, 10))}>
               {#each baudOptions as b}
                 <option value={b}>{b}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+
+        <div class="menu-sep"></div>
+        <div class="menu-label">{$t("setup.pia")}</div>
+        <label class="field">
+          <span class="lk">{$t("pia.enabled")}</span>
+          <input type="checkbox" checked={piaEnabled} disabled={running} onchange={(e) => onPiaToggle((e.target as HTMLInputElement).checked)} />
+        </label>
+        {#if piaEnabled}
+          <label class="field">
+            <span class="lk">{$t("pia.baseAddr")}</span>
+            <input class="mono" value={piaBase.toString(16).toUpperCase()} onchange={hexInput(onPiaBaseChange, 0xffff)} size="6" />
+          </label>
+        {/if}
+
+        <div class="menu-sep"></div>
+        <div class="menu-label">{$t("setup.ay")}</div>
+        <label class="field">
+          <span class="lk">{$t("ay.enabled")}</span>
+          <input type="checkbox" checked={ayEnabled} disabled={running} onchange={(e) => onAyToggle((e.target as HTMLInputElement).checked)} />
+        </label>
+        {#if ayEnabled}
+          <label class="field">
+            <span class="lk">{$t("ay.baseAddr")}</span>
+            <input class="mono" value={ayBase.toString(16).toUpperCase()} disabled={running} onchange={hexInput(onAyBaseChange, 0xffff)} size="6" />
+          </label>
+          <label class="field">
+            <span class="lk">{$t("ay.chipClock")}</span>
+            <select value={ayChipClock} disabled={running} onchange={(e) => onAyChipClockChange(parseInt((e.target as HTMLSelectElement).value, 10))}>
+              {#each chipClockPresets as clk}
+                <option value={clk}>{(clk / 1_000_000).toFixed(4)} MHz</option>
               {/each}
             </select>
           </label>
@@ -374,6 +435,16 @@
     opacity: 0.5;
   }
 
+  .hint {
+    margin: 4px 0 0;
+    padding: 0 2px;
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--text-faint);
+    max-width: 22rem;
+    white-space: normal;
+  }
+
   @media (max-width: 880px) {
     .brand-title {
       display: none;
@@ -381,10 +452,33 @@
     .interrupts {
       display: none;
     }
+    .sep {
+      display: none;
+    }
   }
 
   @media (max-width: 720px) {
-    .menus .menu-wrap:nth-child(2) {
+    .menus :global(.popover-trigger .lbl) {
+      display: none;
+    }
+    .menus :global(.popover-trigger) {
+      padding: 0 7px;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .app-header {
+      gap: 6px;
+      padding: 0 8px;
+    }
+  }
+
+  @media (max-width: 400px) {
+    .app-header {
+      gap: 4px;
+      padding: 0 6px;
+    }
+    .locale {
       display: none;
     }
   }

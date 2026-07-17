@@ -7,7 +7,11 @@ MC6809 / HD6309 CPU debugger with Rust core, Tauri desktop shell, and Svelte UI.
 - Full MC6809 instruction set emulation
 - HD6309 extensions: W/V/MD registers, LEA*, MULD/DIVD/DIVQ, TFM, bit ops, inter-register math
 - CPU variant switch (MC6809 ↔ HD6309) with variant-aware disassembly
-- Machine profiles: Bare Metal, TRS-80 CoCo 2, Dragon 32 (memory map + I/O stubs)
+- Machine profiles: Bare Metal, TRS-80 CoCo 2, Dragon 32
+- **Microsoft BASIC firmware** (embedded):
+  - CoCo 2: Extended Color BASIC 1.1 (`$8000`) + Color BASIC 1.2 (`$A000`)
+  - Dragon 32: Microsoft BASIC (`$8000`)
+- PIA/SAM/VDG, VSYNC IRQ, host keyboard → matrix
 - Register viewer with editable values and condition flags
 - Disassembler synchronized to PC
 - Motorola-syntax assembler with HD6309 mnemonics
@@ -15,6 +19,18 @@ MC6809 / HD6309 CPU debugger with Rust core, Tauri desktop shell, and Svelte UI.
 - Breakpoints, execution trace, session save/load
 - Binary import/export
 - Bilingual UI (DE / EN)
+
+## Microsoft BASIC quick start
+
+1. Start the app (`npm run tauri:dev`)
+2. In **Setup**, choose **TRS-80 CoCo 2** or **Dragon 32**
+3. Open the **VDG Text** panel and click the screen (keyboard capture)
+4. Press **Run** — cold start should show the BASIC banner and `OK`
+5. Type BASIC (e.g. `PRINT "HI"` then Enter)
+
+ROMs live under `crates/m6809-machine/roms/` and are embedded at compile time.
+They are copyrighted by Microsoft / Tandy / Dragon Data; redistribute only if
+you have the right to do so. Refresh copies with `scripts/fetch-roms.ps1`.
 
 ## Prerequisites
 

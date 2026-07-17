@@ -16,6 +16,11 @@ pub struct AssembledProgram {
     /// Load address from the first `ORG` directive (default `$0100`).
     pub origin: u16,
     pub bytes: Vec<u8>,
+    /// Maps the 1-based **original source line number** to the address of the
+    /// code emitted by that line. Lines that produce no code (comments, blank
+    /// lines, `EQU`/`SET`, `END`, and pure-label lines) are omitted. Used to set
+    /// breakpoints directly in source code via the original line number.
+    pub line_map: std::collections::HashMap<usize, u16>,
 }
 
 /// Assembler error.
@@ -255,6 +260,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
     }
 
     // Second pass: emit bytes.
+    let mut line_map: std::collections::HashMap<usize, u16> = std::collections::HashMap::new();
     for (line_no, line) in lines {
         let parsed = parse_source_line(&line);
         if parsed.statement.is_empty() {
@@ -271,6 +277,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             break;
         }
         if upper.starts_with("FCB") {
+            record_line(&mut line_map, line_no, pc);
             for value in parse_data_list(&parsed.statement[3..], line_no, false, &labels)? {
                 emit(&mut output, pc, value as u8);
                 pc += 1;
@@ -278,6 +285,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             continue;
         }
         if upper.starts_with("FDB") {
+            record_line(&mut line_map, line_no, pc);
             for value in parse_data_list(&parsed.statement[3..], line_no, true, &labels)? {
                 emit(&mut output, pc, (value >> 8) as u8);
                 pc += 1;
@@ -287,6 +295,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             continue;
         }
         if upper.starts_with("RMB ") {
+            record_line(&mut line_map, line_no, pc);
             let count = parse_expression(parsed.statement[4..].trim(), line_no, &labels)?;
             for _ in 0..count {
                 emit(&mut output, pc, 0);
@@ -298,6 +307,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
             continue;
         }
 
+        record_line(&mut line_map, line_no, pc);
         let bytes = encode_instruction(&parsed.statement, pc, line_no, &labels, &parts)?;
         for b in bytes {
             emit(&mut output, pc, b);
@@ -309,6 +319,7 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
         return Ok(AssembledProgram {
             origin: origin as u16,
             bytes: Vec::new(),
+            line_map: std::collections::HashMap::new(),
         });
     }
 
@@ -325,7 +336,14 @@ pub fn assemble(source: &str) -> Result<AssembledProgram, AsmError> {
     Ok(AssembledProgram {
         origin: min_addr as u16,
         bytes: bin,
+        line_map,
     })
+}
+
+/// Records the address of the first byte emitted by a source line so that
+/// breakpoints can be set on the original (1-based) source line number.
+fn record_line(line_map: &mut std::collections::HashMap<usize, u16>, line: usize, addr: u32) {
+    line_map.entry(line).or_insert(addr as u16);
 }
 
 fn emit(out: &mut Vec<(u32, u8)>, addr: u32, byte: u8) {
@@ -2113,5 +2131,33 @@ mod tests {
         assert_eq!(asm_bytes("DEX"), vec![0x30, 0x1F]); // LEAX -1,X
         assert_eq!(asm_bytes("INY"), vec![0x31, 0x21]); // LEAY 1,Y
         assert_eq!(asm_bytes("DEY"), vec![0x31, 0x3F]); // LEAY -1,Y
+    }
+
+    #[test]
+    fn line_map_records_source_line_addresses() {
+        let src = "\
+; comment line (1)
+ORG $0100             ; line 2
+start LDA #$42        ; line 3
+NOP                   ; line 4
+COUNT EQU 5           ; line 5
+BRA start             ; line 6
+END"; // line 7
+        let prog = assemble(src).unwrap();
+        // line 2 (ORG) and 5 (EQU) produce no code -> absent
+        assert!(!prog.line_map.contains_key(&2));
+        assert!(!prog.line_map.contains_key(&5));
+        // code-producing lines map to their emitted address
+        assert_eq!(prog.line_map.get(&3), Some(&0x0100)); // LDA #$42
+        assert_eq!(prog.line_map.get(&4), Some(&0x0102)); // NOP
+        assert_eq!(prog.line_map.get(&6), Some(&0x0103)); // BRA start
+    }
+
+    #[test]
+    fn line_map_rmb_marks_reserved_region() {
+        let src = "ORG $0200\nBUF RMB 4\nLDA #$00\nEND";
+        let prog = assemble(src).unwrap();
+        assert_eq!(prog.line_map.get(&2), Some(&0x0200)); // RMB reserves here
+        assert_eq!(prog.line_map.get(&3), Some(&0x0204)); // LDA after the buffer
     }
 }

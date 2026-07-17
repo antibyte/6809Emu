@@ -36,4 +36,5 @@ export type IconName =
   | "collapse"
   | "expand"
   | "check"
-  | "view";
+  | "view"
+  | "clear";

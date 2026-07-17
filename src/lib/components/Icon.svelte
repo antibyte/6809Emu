@@ -116,6 +116,8 @@
     <rect x="9" y="2" width="5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.2" />
     <rect x="2" y="9" width="5" height="5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.2" />
     <rect x="9" y="9" width="5" height="5" rx="0.8" />
+  {:else if name === "clear"}
+    <path d="M3 6h10M5 6v6a1 1 0 001 1h4a1 1 0 001-1V6M8 3v3M6 3h4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
   {/if}
 </svg>
 

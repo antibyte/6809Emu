@@ -12,6 +12,8 @@
   import OnboardingBanner from "./lib/components/OnboardingBanner.svelte";
   import TabBar from "./lib/components/TabBar.svelte";
   import IoPanel from "./lib/components/IoPanel.svelte";
+  import PiaPanel from "./lib/components/PiaPanel.svelte";
+  import AyPanel from "./lib/components/AyPanel.svelte";
   import VideoModal from "./lib/components/VideoModal.svelte";
   import VideoPanel from "./lib/components/VideoPanel.svelte";
   import TerminalPanel from "./lib/components/TerminalPanel.svelte";
@@ -35,7 +37,7 @@
     type PanelId,
     type SidebarSection,
   } from "./lib/layout";
-  import type { AciaConfig, AciaTerminalState, CpuState, CpuVariant, DisasmLine, MachineInfo, MachineKind, MachineState, TraceEntry, VideoFrame } from "./lib/types";
+  import type { AciaConfig, AciaTerminalState, AyConfig, AyState, CpuState, CpuVariant, DisasmLine, MachineInfo, MachineKind, MachineState, PiaConfig, PiaState, TraceEntry, VideoFrame } from "./lib/types";
   import * as api from "./lib/api";
 
   let cpu = $state<CpuState | null>(null);
@@ -47,12 +49,22 @@
   let breakpoints = $state(new Set<number>());
   let watchpoints = $state(new Set<number>());
   let breakpointTexts = $state(new Map<number, string>());
+  // Maps a 1-based source line number to the address emitted by that line,
+  // populated after each successful assemble. Lets the user set breakpoints
+  // directly in the source editor.
+  let sourceLineMap = $state(new Map<number, number>());
   let asmSource = $state(`        ORG $0100
 start   LDA  #$42
         NOP
         BRA  start
         END`);
   let asmErrors = $state<{ line: number; message: string }[]>([]);
+  // Editing the source invalidates the line->address mapping; clear it so stale
+  // addresses can't be toggled until the next successful assemble repopulates it.
+  $effect(() => {
+    asmSource;
+    sourceLineMap = new Map();
+  });
   let loadAddr = $state(0x0100);
   let resetPc = $state(0x0100);
   let appliedLoadAddr = $state(0x0100);
@@ -86,6 +98,14 @@ start   LDA  #$42
         text: breakpointTexts.get(address) ?? "",
       }))
   );
+  // Inverted view of sourceLineMap: address -> source line. Rebuilt whenever the
+  // source mapping changes so the editor gutter can highlight active breakpoints.
+  let addrToLine = $derived(
+    new Map<number, number>([...sourceLineMap].map(([l, a]) => [a, l]))
+  );
+  let breakpointLines = $derived(
+    new Set([...breakpoints].map((a) => addrToLine.get(a)).filter((l): l is number => l !== undefined))
+  );
   let traceId = 0;
   let tickRaf = 0;
   let pendingTick: api.TickPayload | null = null;
@@ -102,7 +122,6 @@ start   LDA  #$42
   let showVideoModal = $state(false);
 
   const LAYOUT_LIMITS = {
-    splitterPx: 10,
     mainMinPx: 300,
     bottomMinPx: 200,
     sidebarMinPx: 240,
@@ -112,6 +131,11 @@ start   LDA  #$42
     videoMinPx: 240,
     videoMaxPx: 640,
   } as const;
+
+  function splitterPx(): number {
+    if (typeof document === "undefined") return 10;
+    return parseInt(getComputedStyle(document.documentElement).getPropertyValue("--splitter-w")) || 10;
+  }
 
   function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
@@ -141,11 +165,77 @@ start   LDA  #$42
     kind: "bare",
     io_registers: [],
     acia: { enabled: false, base_addr: 0xffa0, baud: 9600, e_clock_hz: 1_000_000 },
+    pia: null,
+    ay: { enabled: false, base_addr: 0xff40, chip_clock_hz: 1_000_000 },
   });
   let aciaEnabled = $state(false);
   let videoFrame = $state<VideoFrame | null>(null);
   let aciaTerminal = $state<AciaTerminalState | null>(null);
+  let piaState = $state<PiaState | null>(null);
+  let ayState = $state<AyState | null>(null);
+  let ayMuted = $state(false);
   let machineChanging = $state(false);
+
+  // Web Audio playback state for AY-3-8910 output.
+  let audioCtx: AudioContext | null = null;
+  let audioFilter: BiquadFilterNode | null = null;
+  let nextStartTime = 0;
+  /** Schedule ahead of the playhead so IPC jitter does not underrun. */
+  const AUDIO_LEAD_S = 0.12;
+  /** Allow a deeper queue before snapping (avoids choppy restarts). */
+  const AUDIO_MAX_LEAD_S = 0.5;
+
+  function ensureAudioCtx(): AudioContext | null {
+    if (typeof window === "undefined") return null;
+    if (!audioCtx) {
+      try {
+        audioCtx = new AudioContext({ sampleRate: 44100 });
+        // Soft low-pass: hard AY square waves alias into whistling without it.
+        audioFilter = audioCtx.createBiquadFilter();
+        audioFilter.type = "lowpass";
+        audioFilter.frequency.value = 12_000;
+        audioFilter.Q.value = 0.7;
+        audioFilter.connect(audioCtx.destination);
+        nextStartTime = audioCtx.currentTime + AUDIO_LEAD_S;
+      } catch {
+        audioCtx = null;
+        audioFilter = null;
+      }
+    }
+    return audioCtx;
+  }
+
+  function playAyAudioChunk(samples: number[]) {
+    if (ayMuted || samples.length === 0) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx || !audioFilter) return;
+    if (ctx.state === "suspended") {
+      void ctx.resume();
+    }
+    // Backend always renders at 44100; keep buffer rate matched so pitch is correct
+    // even when the AudioContext runs at 48000 (browser resamples).
+    const rate = 44100;
+    const buf = ctx.createBuffer(1, samples.length, rate);
+    const channel = buf.getChannelData(0);
+    for (let i = 0; i < samples.length; i++) {
+      const s = samples[i];
+      channel[i] = Number.isFinite(s) ? s : 0;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioFilter);
+    const now = ctx.currentTime;
+    let start = nextStartTime;
+    if (start < now + 0.02) {
+      // Underrun / first chunk: rebuild lead without hard cut at "now".
+      start = now + AUDIO_LEAD_S;
+    } else if (start - now > AUDIO_MAX_LEAD_S) {
+      // Queue too deep (e.g. after pause): trim latency, keep continuity.
+      start = now + AUDIO_LEAD_S;
+    }
+    src.start(start);
+    nextStartTime = start + samples.length / rate;
+  }
 
   // ---- Derived panel visibility / stacks ----
 
@@ -159,6 +249,10 @@ start   LDA  #$42
       items.push({ id: "breakpoints", share: $layout.sizes.sidebarRows.breakpoints, collapsed: $layout.collapsed.breakpoints });
     if ($layout.visible.watchpoints)
       items.push({ id: "watchpoints", share: $layout.sizes.sidebarRows.watchpoints, collapsed: $layout.collapsed.watchpoints });
+    if ($layout.visible.pia)
+      items.push({ id: "pia", share: $layout.sizes.sidebarRows.pia, collapsed: $layout.collapsed.pia });
+    if ($layout.visible.ay && ayEnabled)
+      items.push({ id: "ay", share: $layout.sizes.sidebarRows.ay, collapsed: $layout.collapsed.ay });
     return items;
   });
   let sidebarVisible = $derived(sidebarItems.length > 0);
@@ -187,6 +281,8 @@ start   LDA  #$42
       { id: "asm", label: $t("asm.title"), show: $layout.visible.asm },
       { id: "registers", label: $t("registers.title"), show: $layout.visible.registers },
       { id: "io", label: $t("machine.ioTitle"), show: $layout.visible.io },
+      { id: "pia", label: $t("pia.title"), show: $layout.visible.pia && piaState !== null },
+      { id: "ay", label: $t("ay.title"), show: $layout.visible.ay && ayState !== null },
     ].filter((x) => x.show)
   );
 
@@ -263,6 +359,11 @@ start   LDA  #$42
     } else {
       aciaTerminal = null;
     }
+    if (machineState.ay?.enabled) {
+      await refreshAyState();
+    } else {
+      ayState = null;
+    }
   }
 
   async function handleAciaConfigChange(patch: Partial<AciaConfig>) {
@@ -297,6 +398,85 @@ start   LDA  #$42
     }
   }
 
+  async function handleAciaClear() {
+    aciaTerminal = await api.clearAciaTerminal();
+  }
+
+  // ---- PIA handlers ----
+
+  let piaEnabled = $derived(machineState.pia?.enabled ?? false);
+
+  async function refreshPiaState() {
+    piaState = await api.getPiaState();
+  }
+
+  async function handlePiaConfigChange(patch: Partial<PiaConfig>) {
+    const base: PiaConfig = machineState.pia ?? { enabled: false, base_addr: 0xFF10 };
+    const next: PiaConfig = { ...base, ...patch };
+    const dto = await api.setPiaConfig(next);
+    machineState = { ...dto };
+    if (next.enabled) {
+      await refreshPiaState();
+      setPanel("pia", true);
+    } else {
+      piaState = null;
+      if (compactLayout && activeMainTab === "pia") {
+        activeMainTab = "disasm";
+      }
+    }
+  }
+
+  async function handlePiaInputToggle(port: "a" | "b", bit: number, on: boolean) {
+    piaState = await api.setPiaInput(port, bit, on);
+  }
+
+  async function maybeRefreshPiaOnTick() {
+    if (!piaEnabled) return;
+    piaState = await api.getPiaState();
+  }
+
+  // ---- AY-3-8910 handlers ----
+
+  let ayEnabled = $derived(machineState.ay?.enabled ?? false);
+
+  async function refreshAyState() {
+    ayState = await api.getAyState();
+  }
+
+  async function handleAyConfigChange(patch: Partial<AyConfig>) {
+    const base: AyConfig = machineState.ay ?? { enabled: false, base_addr: 0xFF40, chip_clock_hz: 1_000_000 };
+    const next: AyConfig = { ...base, ...patch };
+    const dto = await api.setAyConfig(next);
+    machineState = dto;
+    if (next.enabled) {
+      await refreshAyState();
+      setPanel("ay", true);
+    } else {
+      ayState = null;
+      // Suspend audio context when chip is disabled.
+      if (audioCtx && audioCtx.state !== "suspended") {
+        void audioCtx.suspend();
+      }
+      if (compactLayout && activeMainTab === "ay") {
+        activeMainTab = "disasm";
+      }
+    }
+  }
+
+  async function maybeRefreshAyOnTick() {
+    if (!ayEnabled) return;
+    ayState = await api.getAyState();
+  }
+
+  function handleAyToggleMute() {
+    ayMuted = !ayMuted;
+    if (ayMuted && audioCtx && audioCtx.state !== "suspended") {
+      void audioCtx.suspend();
+    } else if (!ayMuted && audioCtx && audioCtx.state === "suspended") {
+      void audioCtx.resume();
+    }
+  }
+
   async function refresh() {
     cpu = await api.getCpuState();
     await refreshDisasm();
@@ -304,6 +484,8 @@ start   LDA  #$42
     trace = (await api.getTrace()).map((s) => ({ ...s, id: ++traceId })).slice(-traceMaxDisplay);
     await syncBreakpointsFromBackend();
     await refreshMachineState();
+    await refreshPiaState();
+    await refreshAyState();
   }
 
   async function refreshDisasm() {
@@ -328,6 +510,8 @@ start   LDA  #$42
       ...trace.slice(-(traceMaxDisplay - 1)),
       { ...payload.step, id: ++traceId },
     ];
+    // Audio is scheduled immediately in the event listener — never coalesce
+    // it through rAF (dropped chunks = choppy tone).
   }
 
   async function maybeRefreshVideoOnTick() {
@@ -481,6 +665,7 @@ start   LDA  #$42
       if (result.errors.length === 0) {
         loadAddr = result.origin;
         appliedLoadAddr = result.origin;
+        sourceLineMap = new Map(Object.entries(result.lineMap).map(([l, a]) => [Number(l), a]));
         if (aciaEnabled) {
           await api.resetEmulator();
           cpu = await api.getCpuState();
@@ -553,12 +738,57 @@ start   LDA  #$42
     aciaTerminal = await api.getAciaTerminal();
   }
 
+  async function setupCocoVideoDemo() {
+    if (machineState.kind !== "coco2") {
+      await handleMachineChange("coco2");
+    }
+    setPanel("video", true);
+  }
+
+  async function setupAyDemo() {
+    if (machineState.kind !== "bare") {
+      await handleMachineChange("bare");
+    }
+    const dto = await api.setAyConfig({
+      enabled: true,
+      base_addr: 0xFF40,
+      chip_clock_hz: 1_000_000,
+    });
+    machineState = dto;
+    ayState = await api.getAyState();
+    setPanel("ay", true);
+  }
+
   async function handleLoadExample(source: string, exampleId?: string) {
     asmSource = source;
-    if (exampleId !== "aciaecho") return;
+    const needsAcia = exampleId === "aciaecho";
+    const needsCoco =
+      exampleId === "coco2" ||
+      exampleId === "coco2video" ||
+      exampleId === "coco2sg4";
+    const needsHd6309 = exampleId === "hd6309";
+    const needsPia = exampleId === "pia";
+    const needsAy = exampleId === "aymusic";
+    if (!needsAcia && !needsCoco && !needsHd6309 && !needsPia && !needsAy) return;
+
     await withBusy(async () => {
       try {
-        await setupAciaEchoDemo();
+        if (needsAcia) {
+          await setupAciaEchoDemo();
+        }
+        if (needsCoco) {
+          await setupCocoVideoDemo();
+        }
+        if (needsHd6309 && cpu?.variant !== "hd6309") {
+          cpu = await api.setCpuVariant("hd6309");
+        }
+        if (needsPia && !piaEnabled) {
+          await handlePiaConfigChange({ enabled: true, base_addr: machineState.pia?.base_addr ?? 0xFF10 });
+        }
+        if (needsAy) {
+          await setupAyDemo();
+        }
+
         const result = await api.assembleSource(asmSource, loadAddr, true);
         asmErrors = result.errors;
         if (result.errors.length > 0) {
@@ -567,12 +797,26 @@ start   LDA  #$42
         }
         loadAddr = result.origin;
         appliedLoadAddr = result.origin;
-        await api.resetEmulator();
-        cpu = await api.getCpuState();
-        if (aciaEnabled) {
-          aciaTerminal = await api.aciaRunSteps(200);
+        sourceLineMap = new Map(Object.entries(result.lineMap).map(([l, a]) => [Number(l), a]));
+
+        if (needsAcia) {
+          await api.resetEmulator();
+          cpu = await api.getCpuState();
+          if (aciaEnabled) {
+            aciaTerminal = await api.aciaRunSteps(200);
+          }
+        } else if (needsCoco) {
+          // Jump straight to the RAM program (boot ROM already installed
+          // the PIA/SAM defaults; our examples re-init VDG themselves).
+          await api.resetEmulator();
+          cpu = await api.setCpuRegister("PC", result.origin);
+        } else {
+          await api.resetEmulator();
+          cpu = await api.setCpuRegister("PC", result.origin);
         }
+
         await refresh();
+        showToast(translate("toast.assembleSuccess"), "success");
       } catch {
         showToast(translate("toast.sessionError"), "error");
       }
@@ -604,6 +848,14 @@ start   LDA  #$42
       }
       breakpoints = new Set(breakpoints);
     });
+  }
+
+  // Toggle a breakpoint from a source line: resolve the line to its emitted
+  // address, then delegate to the address-based breakpoint handler.
+  async function handleToggleBreakpointLine(line: number) {
+    const addr = sourceLineMap.get(line);
+    if (addr === undefined) return;
+    await handleToggleBreakpoint(addr);
   }
 
   async function handleToggleBreakpointAtPc() {
@@ -676,6 +928,14 @@ start   LDA  #$42
         }
         if (result.asm_source) {
           asmSource = result.asm_source;
+          const asm = await api.assembleSource(result.asm_source, loadAddr, false);
+          if (asm.errors.length === 0) {
+            sourceLineMap = new Map(Object.entries(asm.lineMap).map(([l, a]) => [Number(l), a]));
+          } else {
+            sourceLineMap = new Map();
+          }
+        } else {
+          sourceLineMap = new Map();
         }
         loadAddr = result.load_config.load_addr;
         resetPc = result.load_config.reset_pc;
@@ -792,6 +1052,15 @@ start   LDA  #$42
     });
   }
 
+  async function handleMachineKey(code: string, down: boolean) {
+    if (machineState.kind === "bare") return;
+    try {
+      await api.machineKeyEvent(code, down);
+    } catch {
+      /* ignore key routing errors while paused/busy */
+    }
+  }
+
   async function handleMachineChange(kind: MachineKind) {
     if (machineChanging || machineState.kind === kind) return;
     machineChanging = true;
@@ -862,7 +1131,7 @@ start   LDA  #$42
       const rect = contentSplit.getBoundingClientRect();
       const y = clientY - rect.top;
       const minMain = L.mainMinPx;
-      const maxMain = rect.height - L.splitterPx - L.bottomMinPx;
+      const maxMain = rect.height - splitterPx() - L.bottomMinPx;
       if (maxMain < minMain) return;
       const mainPct = (clamp(y, minMain, maxMain) / rect.height) * 100;
       patchSizes({ mainPct });
@@ -872,7 +1141,7 @@ start   LDA  #$42
       const rect = workspaceSplit.getBoundingClientRect();
       const x = clientX - rect.left;
       const hasVideo = videoDockedVisible;
-      const reserved = L.splitterPx + (hasVideo ? L.splitterPx + L.videoMinPx : 0);
+      const reserved = splitterPx() + (hasVideo ? splitterPx() + L.videoMinPx : 0);
       const maxSidebar = Math.min(L.sidebarMaxPx, rect.width - reserved - L.disasmMinPx - L.asmMinPx);
       if (maxSidebar < L.sidebarMinPx) return;
       patchSizes({ sidebarPx: clamp(x, L.sidebarMinPx, maxSidebar) });
@@ -881,7 +1150,7 @@ start   LDA  #$42
     if (op.kind === "disasm-asm" && mainColumns) {
       const rect = mainColumns.getBoundingClientRect();
       const x = clientX - rect.left;
-      const maxDisasm = rect.width - L.splitterPx - L.asmMinPx;
+      const maxDisasm = rect.width - splitterPx() - L.asmMinPx;
       if (maxDisasm < L.disasmMinPx) return;
       const disasmPct = (clamp(x, L.disasmMinPx, maxDisasm) / rect.width) * 100;
       patchSizes({ disasmPct });
@@ -890,7 +1159,7 @@ start   LDA  #$42
     if (op.kind === "center-video" && workspaceSplit) {
       const rect = workspaceSplit.getBoundingClientRect();
       const videoLeft = rect.right - clientX;
-      const maxVideo = Math.min(L.videoMaxPx, rect.width - L.splitterPx - L.sidebarMinPx - L.disasmMinPx - L.asmMinPx - L.splitterPx);
+      const maxVideo = Math.min(L.videoMaxPx, rect.width - splitterPx() - L.sidebarMinPx - L.disasmMinPx - L.asmMinPx - splitterPx());
       if (maxVideo < L.videoMinPx) return;
       patchSizes({ videoPx: clamp(videoLeft, L.videoMinPx, maxVideo) });
       return;
@@ -976,7 +1245,7 @@ start   LDA  #$42
       const sizes = getLayout().sizes;
       const mainPx = (sizes.mainPct / 100) * rect.height + delta;
       const minMain = LAYOUT_LIMITS.mainMinPx;
-      const maxMain = rect.height - LAYOUT_LIMITS.splitterPx - LAYOUT_LIMITS.bottomMinPx;
+      const maxMain = rect.height - splitterPx() - LAYOUT_LIMITS.bottomMinPx;
       if (maxMain < minMain) return;
       patchSizes({ mainPct: (clamp(mainPx, minMain, maxMain) / rect.height) * 100 });
       return;
@@ -999,7 +1268,7 @@ start   LDA  #$42
       if (!rect) return;
       const sizes = getLayout().sizes;
       const disasmPx = (sizes.disasmPct / 100) * rect.width + delta;
-      const maxDisasm = rect.width - LAYOUT_LIMITS.splitterPx - LAYOUT_LIMITS.asmMinPx;
+      const maxDisasm = rect.width - splitterPx() - LAYOUT_LIMITS.asmMinPx;
       if (maxDisasm < LAYOUT_LIMITS.disasmMinPx) return;
       patchSizes({ disasmPct: (clamp(disasmPx, LAYOUT_LIMITS.disasmMinPx, maxDisasm) / rect.width) * 100 });
       return;
@@ -1070,6 +1339,11 @@ start   LDA  #$42
       }
 
       unlistenTick = await api.onEmulatorTick((payload) => {
+        // Schedule audio on every event — must not go through rAF coalescing,
+        // otherwise intermediate chunks are dropped and the tone stutters.
+        if (payload.ay_audio && payload.ay_audio.length > 0) {
+          playAyAudioChunk(payload.ay_audio);
+        }
         pendingTick = payload;
         if (!tickRaf) {
           tickRaf = requestAnimationFrame(() => {
@@ -1082,6 +1356,8 @@ start   LDA  #$42
               void maybeFollowMemory(tick.cpu.pc);
               void maybeRefreshVideoOnTick();
               void maybeRefreshTerminalOnTick();
+              void maybeRefreshPiaOnTick();
+              void maybeRefreshAyOnTick();
             }
           });
         }
@@ -1114,6 +1390,11 @@ start   LDA  #$42
       unlistenStopped?.();
       unregisterShortcuts();
       mq.removeEventListener("change", onResize);
+      if (audioCtx) {
+        void audioCtx.close();
+        audioCtx = null;
+        audioFilter = null;
+      }
     };
   });
 </script>
@@ -1160,6 +1441,16 @@ start   LDA  #$42
     onToggleVideo={handleToggleVideo}
     onOpenShortcuts={() => (showShortcuts = true)}
     onResetLayout={handleResetLayout}
+    piaEnabled={piaEnabled}
+    onPiaToggle={(enabled) => void handlePiaConfigChange({ enabled })}
+    piaBase={machineState.pia?.base_addr ?? 0xFF10}
+    onPiaBaseChange={(v) => void handlePiaConfigChange({ base_addr: v })}
+    ayEnabled={ayEnabled}
+    onAyToggle={(enabled) => void handleAyConfigChange({ enabled })}
+    ayBase={machineState.ay?.base_addr ?? 0xFF40}
+    onAyBaseChange={(v) => void handleAyConfigChange({ base_addr: v })}
+    ayChipClock={machineState.ay?.chip_clock_hz ?? 1_000_000}
+    onAyChipClockChange={(v) => void handleAyConfigChange({ chip_clock_hz: v })}
   />
 
   <div
@@ -1235,6 +1526,19 @@ start   LDA  #$42
                   onClearAll={handleClearAllWatchpoints}
                   onGoto={handleWatchpointGoto}
                 />
+              {:else if item.id === "pia"}
+                <PiaPanel
+                  state={piaState}
+                  onToggleInput={handlePiaInputToggle}
+                  onClose={() => handlePanelClose("pia")}
+                />
+              {:else if item.id === "ay"}
+                <AyPanel
+                  state={ayState}
+                  muted={ayMuted}
+                  onToggleMute={handleAyToggleMute}
+                  onClose={() => handlePanelClose("ay")}
+                />
               {/if}
             </section>
           {/each}
@@ -1291,6 +1595,9 @@ start   LDA  #$42
             {assembling}
             onAssemble={handleAssemble}
             onLoadExample={handleLoadExample}
+            breakpointLines={breakpointLines}
+            hasAddress={(line) => sourceLineMap.has(line)}
+            onToggleBreakpointLine={handleToggleBreakpointLine}
           />
         </section>
       </div>
@@ -1309,9 +1616,12 @@ start   LDA  #$42
         <section class="video-dock">
           <VideoPanel
             frame={videoFrame}
+            keyboardEnabled={machineState.kind !== "bare"}
+            firmwareLabel={machineState.firmware?.name ?? ""}
             onGoto={handleMemoryGoto}
             onFullscreen={handleVideoFullscreen}
             onClose={handleVideoDockClose}
+            onKey={handleMachineKey}
           />
         </section>
       {/if}
@@ -1330,6 +1640,21 @@ start   LDA  #$42
             registers={machineState.io_registers}
             onGoto={handleMemoryGoto}
             onWrite={handleIoWrite}
+          />
+        </section>
+        <section class="compact-panel" class:tab-hidden={activeMainTab !== "pia"}>
+          <PiaPanel
+            state={piaState}
+            onToggleInput={handlePiaInputToggle}
+            onClose={() => handlePanelClose("pia")}
+          />
+        </section>
+        <section class="compact-panel" class:tab-hidden={activeMainTab !== "ay"}>
+          <AyPanel
+            state={ayState}
+            muted={ayMuted}
+            onToggleMute={handleAyToggleMute}
+            onClose={() => handlePanelClose("ay")}
           />
         </section>
       {/if}
@@ -1394,6 +1719,7 @@ start   LDA  #$42
                   terminal={aciaTerminal}
                   baseAddr={machineState.acia.base_addr}
                   onSend={(text) => void handleAciaSend(text)}
+                  onClear={handleAciaClear}
                   onClose={() => handlePanelClose("terminal")}
                 />
               {/if}
@@ -1427,6 +1753,7 @@ start   LDA  #$42
                   terminal={aciaTerminal}
                   baseAddr={machineState.acia.base_addr}
                   onSend={(text) => void handleAciaSend(text)}
+                  onClear={handleAciaClear}
                   onClose={() => handlePanelClose("terminal")}
                 />
               {/if}
@@ -1499,7 +1826,7 @@ start   LDA  #$42
 
   .content-split {
     display: grid;
-    grid-template-rows: minmax(300px, var(--main-pct)) 10px minmax(200px, 1fr);
+    grid-template-rows: minmax(300px, var(--main-pct)) var(--splitter-w) minmax(200px, 1fr);
     flex: 1;
     min-height: 0;
   }
@@ -1516,22 +1843,22 @@ start   LDA  #$42
 
   .workspace {
     display: grid;
-    grid-template-columns: 10px minmax(0, 1fr);
+    grid-template-columns: var(--splitter-w) minmax(0, 1fr);
     gap: 0;
     min-height: 0;
     min-width: 0;
   }
 
   .workspace.has-sidebar {
-    grid-template-columns: minmax(240px, var(--sidebar-px)) 10px minmax(0, 1fr);
+    grid-template-columns: minmax(240px, var(--sidebar-px)) var(--splitter-w) minmax(0, 1fr);
   }
 
   .workspace.has-sidebar.has-video {
-    grid-template-columns: minmax(240px, var(--sidebar-px)) 10px minmax(0, 1fr) 10px var(--video-px);
+    grid-template-columns: minmax(240px, var(--sidebar-px)) var(--splitter-w) minmax(0, 1fr) var(--splitter-w) var(--video-px);
   }
 
   .workspace:not(.has-sidebar).has-video {
-    grid-template-columns: minmax(0, 1fr) 10px var(--video-px);
+    grid-template-columns: minmax(0, 1fr) var(--splitter-w) var(--video-px);
   }
 
   .sidebar {
@@ -1561,7 +1888,7 @@ start   LDA  #$42
 
   .main-columns {
     display: grid;
-    grid-template-columns: minmax(280px, var(--disasm-pct)) 10px minmax(280px, 1fr);
+    grid-template-columns: minmax(280px, var(--disasm-pct)) var(--splitter-w) minmax(280px, 1fr);
     min-height: 0;
     min-width: 0;
   }

@@ -308,18 +308,26 @@ fn mame_cycle_count_bra_taken() {
     assert_eq!(emu.cpu.total_cycles, 3);
 }
 
-// ── LEA doesn't affect CC ───────────────────────────────────────────
+// ── LEAX/LEAY set Z from EA ─────────────────────────────────────────
 
 #[test]
-fn mame_leax_leay_no_flags() {
+fn mame_leax_sets_z_flag() {
+    // LEAX 5,U with U=0 → X=5, Z clear (Motorola LEAX)
     let mut emu = run_program(&[
-        0x86, 0x00,
         0xCE, 0x00, 0x00,
         0x30, 0x45,
     ]);
-    emu.step(); emu.step(); emu.step();
+    emu.step();
+    emu.step();
     assert_eq!(emu.cpu.x, 5);
-    assert!(emu.cpu.cc.contains(Flags::Z));
+    assert!(!emu.cpu.cc.contains(Flags::Z));
+
+    // LEAX ,X with X=0 → Z set
+    let mut emu2 = run_program(&[0x30, 0x84]);
+    emu2.cpu.x = 0;
+    emu2.cpu.cc.remove(Flags::Z);
+    emu2.step();
+    assert!(emu2.cpu.cc.contains(Flags::Z));
 }
 
 // ── SWI vector and push ─────────────────────────────────────────────
@@ -408,11 +416,14 @@ fn mame_sbca_borrow_chain() {
 
 #[test]
 fn mame_sex_sign_extend() {
-    // SEX sign-extends B into A
+    // SEX sign-extends B into A and sets N/Z from D
     let mut emu = run_program(&[0xC6, 0x80, 0x1D]);
-    emu.step(); emu.step(); // LDB #$80, SEX → A=$FF
+    emu.step();
+    emu.step(); // LDB #$80, SEX → A=$FF, D=$FF80, N=1
     assert_eq!(emu.cpu.a, 0xFF);
     assert_eq!(emu.cpu.b, 0x80);
+    assert!(emu.cpu.cc.contains(Flags::N));
+    assert!(!emu.cpu.cc.contains(Flags::Z));
 }
 
 #[test]

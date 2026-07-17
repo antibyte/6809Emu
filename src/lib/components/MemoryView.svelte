@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "../i18n";
   import Icon from "./Icon.svelte";
+  import { toHex } from "../format";
 
   let {
     address,
@@ -31,7 +32,7 @@
   const clearTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
   $effect(() => {
-    gotoInput = address.toString(16).toUpperCase().padStart(4, "0");
+    gotoInput = toHex(address, 4);
   });
 
   $effect(() => {
@@ -82,10 +83,6 @@
     for (const t of clearTimers.values()) clearTimeout(t);
     clearTimers.clear();
   });
-
-  function fmtAddr(a: number) {
-    return a.toString(16).toUpperCase().padStart(4, "0");
-  }
 
   function handleGoto() {
     const parsed = parseInt(gotoInput, 16);
@@ -168,7 +165,7 @@
     </div>
     {#each rows as row}
       <div class="row">
-        <span class="addr-col mono">{fmtAddr(row.addr)}</span>
+        <span class="addr-col mono">{toHex(row.addr, 4)}</span>
         <span class="bytes" style={bytesGridStyle}>
           {#each row.cells as byte, i}
             {@const cellAddr = row.addr + i}
@@ -176,7 +173,7 @@
               class="cell mono"
               class:has-wp={watchpoints.has(cellAddr)}
               class:changed={isChanged(cellAddr)}
-              value={byte.toString(16).toUpperCase().padStart(2, "0")}
+              value={toHex(byte, 2)}
               onchange={(e) => handleEdit(cellAddr, e)}
               oncontextmenu={(e) => handleContextMenu(cellAddr, e)}
               title={$t("memory.watchpointHint")}

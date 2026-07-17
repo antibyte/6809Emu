@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { CpuState } from "../types";
   import { t } from "../i18n";
-  import Icon from "./Icon.svelte";
+  import CollapseButton from "./CollapseButton.svelte";
+  import { fmtAddr, fmtByte, toHex } from "../format";
 
   let {
     cpu,
@@ -80,18 +81,8 @@
       : []
   );
 
-  function fmt8(v: number) {
-    return `$${v.toString(16).toUpperCase().padStart(2, "0")}`;
-  }
-
-  function fmt16(v: number) {
-    return `$${v.toString(16).toUpperCase().padStart(4, "0")}`;
-  }
-
   function startEdit(name: string, value: number, bits: 8 | 16) {
-    const raw = bits === 8
-      ? value.toString(16).toUpperCase().padStart(2, "0")
-      : value.toString(16).toUpperCase().padStart(4, "0");
+    const raw = toHex(value, bits === 8 ? 2 : 4);
     editing = { name, bits, raw };
   }
 
@@ -164,9 +155,7 @@
       {$t("registers.title")}
     </span>
     {#if onToggleCollapse}
-      <button class="hdr-btn collapse-btn" onclick={onToggleCollapse} title={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-label={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-expanded={!collapsed}>
-        <Icon name="chevron-down" size={13} />
-      </button>
+      <CollapseButton {collapsed} onclick={onToggleCollapse} />
     {/if}
   </div>
   <div class="panel-body">
@@ -189,7 +178,7 @@
                 class="value mono reg-btn"
                 onclick={() => startEdit(reg.label, reg.value, 8)}
                 title={`${$t("registers.editHint")} · ${$t("registers.dec")}: ${reg.value}`}
-              >{fmt8(reg.value)}</button>
+              >{fmtByte(reg.value)}</button>
             {/if}
           </div>
         {/each}
@@ -212,7 +201,7 @@
                 class="value mono reg-btn"
                 onclick={() => startEdit(reg.label, reg.value, 16)}
                 title={`${$t("registers.editHint")} · ${$t("registers.dec")}: ${reg.value}`}
-              >{fmt16(reg.value)}</button>
+              >{fmtAddr(reg.value)}</button>
             {/if}
           </div>
         {/each}
@@ -246,15 +235,6 @@
 
   .register-panel.collapsed .panel-body {
     display: none;
-  }
-
-  .collapse-btn :global(.icon) {
-    transition: transform var(--motion-normal) var(--ease-tactile);
-    margin-right: 0;
-  }
-
-  .register-panel.collapsed .collapse-btn :global(.icon) {
-    transform: rotate(-90deg);
   }
 
   .register-panel .panel-body {

@@ -1,50 +1,66 @@
 import { Decoration, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { RangeSetBuilder } from "@codemirror/state";
+import { MNEMONICS, DIRECTIVES } from "../asm";
 
-const MNEMONICS =
-  "NOP|SYNC|SWI|RTS|RTI|ABX|MUL|SEX|CWAI|ORCC|ANDCC|DAA|INX|DEX|INY|DEY|LBRA|LBRN|" +
-  "LDA|LDB|LDX|LDY|LDU|LDD|LDS|STA|STB|STX|STY|STD|STU|" +
-  "ADDA|ADDB|ADDD|SUBA|SUBB|SUBD|CMPA|CMPB|CMPX|CMPY|CMPD|CMPU|CMPS|" +
-  "ORA|ORB|ANDA|ANDB|EORA|EORB|ADCA|ADCB|SBCA|SBCB|BITA|BITB|" +
-  "BRA|BRN|BNE|BEQ|BCC|BCS|BPL|BMI|BVC|BVS|BGE|BLT|BGT|BLE|BSR|" +
-  "JMP|JSR|LEA|PSH|PUL|TFR|EXG|INC|DEC|NEG|COM|LSR|ROR|ASR|ASL|ROL|" +
-  "CLR|TST|JMP|ORG|FCB|FDB|RMB|EQU|SET|END";
+const ALL_KEYWORDS = [...MNEMONICS, ...DIRECTIVES];
 
 const mnemonicDeco = Decoration.mark({ class: "cm-asm-mnemonic" });
 const commentDeco = Decoration.mark({ class: "cm-asm-comment" });
 const numberDeco = Decoration.mark({ class: "cm-asm-number" });
 const labelDeco = Decoration.mark({ class: "cm-asm-label" });
 
-const mnemonicRe = new RegExp(`\\b(${MNEMONICS})\\b`, "gi");
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Longer tokens first so e.g. TFM+ wins over TFM in alternation.
+const sortedKeywords = [...ALL_KEYWORDS].sort((a, b) => b.length - a.length);
+const mnemonicRe = new RegExp(
+  `\\b(${sortedKeywords.map(escapeRegex).join("|")})\\b`,
+  "gi",
+);
 const commentRe = /;[^\n]*/g;
 const numberRe = /\$[0-9A-Fa-f]+|%[01]+|@[0-7]+|\b\d+\b/g;
 const labelRe = /^[ \t]*([A-Za-z_][\w]*):/gm;
 
+interface HighlightSpan {
+  from: number;
+  to: number;
+  deco: Decoration;
+}
+
 function buildDecorations(text: string): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
+  const spans: HighlightSpan[] = [];
 
   for (const match of text.matchAll(commentRe)) {
     const from = match.index!;
-    builder.add(from, from + match[0].length, commentDeco);
+    spans.push({ from, to: from + match[0].length, deco: commentDeco });
   }
 
   for (const match of text.matchAll(labelRe)) {
     const from = match.index! + match[0].indexOf(match[1]);
-    builder.add(from, from + match[1].length, labelDeco);
+    spans.push({ from, to: from + match[1].length, deco: labelDeco });
   }
 
   for (const match of text.matchAll(numberRe)) {
     const from = match.index!;
     if (!isInsideComment(text, from)) {
-      builder.add(from, from + match[0].length, numberDeco);
+      spans.push({ from, to: from + match[0].length, deco: numberDeco });
     }
   }
 
   for (const match of text.matchAll(mnemonicRe)) {
     const from = match.index!;
     if (!isInsideComment(text, from)) {
-      builder.add(from, from + match[0].length, mnemonicDeco);
+      spans.push({ from, to: from + match[0].length, deco: mnemonicDeco });
     }
+  }
+
+  spans.sort((a, b) => a.from - b.from || a.to - b.to);
+
+  const builder = new RangeSetBuilder<Decoration>();
+  for (const { from, to, deco } of spans) {
+    builder.add(from, to, deco);
   }
 
   return builder.finish();

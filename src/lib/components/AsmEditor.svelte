@@ -4,7 +4,8 @@
   import { t } from "../i18n";
   import { theme } from "../theme";
   import { ASM_EXAMPLES } from "../examples";
-  import { createAsmEditor, setAsmEditorDoc, type AsmEditorHandle } from "../codemirror/create-editor";
+  import { createAsmEditor, setAsmEditorDoc, updateBreakpoints, type AsmEditorHandle } from "../codemirror/create-editor";
+  import InstructionDocModal from "./InstructionDocModal.svelte";
 
   let {
     source = $bindable(),
@@ -12,18 +13,29 @@
     assembling = false,
     onAssemble,
     onLoadExample,
+    breakpointLines = $bindable(new Set<number>()),
+    hasAddress = () => false,
+    onToggleBreakpointLine = () => {},
   }: {
     source: string;
     errors: { line: number; message: string }[];
     assembling?: boolean;
     onAssemble: () => void;
     onLoadExample: (source: string, exampleId?: string) => void;
+    breakpointLines?: Set<number>;
+    hasAddress?: (line: number) => boolean;
+    onToggleBreakpointLine?: (line: number) => void;
   } = $props();
 
   let editorHost: HTMLDivElement | undefined = $state();
   let editorView: EditorView | undefined = $state();
   let handle: AsmEditorHandle | undefined = $state();
   let selectedExample = $state("");
+  let helpMnemonic = $state<string | null>(null);
+
+  function handleHelp(mnem: string) {
+    helpMnemonic = mnem;
+  }
 
   onMount(() => {
     if (!editorHost) return;
@@ -35,6 +47,9 @@
         source = value;
       },
       onAssemble: () => onAssemble(),
+      onHelpMnemonic: handleHelp,
+      hasAddress,
+      onToggleBreakpointLine,
     });
     editorView = handle.view;
     return () => handle?.view.destroy();
@@ -48,6 +63,20 @@
   $effect(() => {
     if (editorView && source !== editorView.state.doc.toString()) {
       setAsmEditorDoc(editorView, source);
+    }
+  });
+
+  // Keep the reactive handlers and breakpoint markers in sync with props.
+  $effect(() => {
+    if (handle) {
+      handle.handlers.hasAddress = hasAddress;
+      handle.handlers.onToggleBreakpointLine = onToggleBreakpointLine;
+    }
+  });
+
+  $effect(() => {
+    if (editorView) {
+      updateBreakpoints(editorView, breakpointLines);
     }
   });
 
@@ -91,6 +120,12 @@
       </div>
     {/if}
   </div>
+
+  <InstructionDocModal
+    open={!!helpMnemonic}
+    mnemonic={helpMnemonic}
+    onClose={() => (helpMnemonic = null)}
+  />
 </div>
 
 <style>

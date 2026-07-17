@@ -257,6 +257,20 @@ fn tfr_to_s_enables_nmi() {
 }
 
 #[test]
+fn exg_to_s_enables_nmi() {
+    let mut emu = run_mc6809(&[0x1E, 0x14]); // EXG X,S
+    emu.cpu.x = 0x0200;
+    emu.memory.write16(0xFFFC, 0x0300);
+    emu.step();
+    assert!(emu.cpu.lds_encountered);
+    assert_eq!(emu.cpu.s, 0x0200);
+    emu.trigger_nmi();
+    let step = emu.step();
+    assert_eq!(step.mnemonic, "NMI");
+    assert_eq!(emu.cpu.pc, 0x0300);
+}
+
+#[test]
 fn tfr_undefined_reg7_to_y_is_ffff() {
     let mut emu = run_mc6809(&[0x1F, 0x72]);
     emu.cpu.y = 0x0000;

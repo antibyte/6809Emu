@@ -1,6 +1,8 @@
 <script lang="ts">
   import { t } from "../i18n";
-  import Icon from "./Icon.svelte";
+  import CollapseButton from "./CollapseButton.svelte";
+  import EmptyState from "./EmptyState.svelte";
+  import { fmtAddr, fmtByte, toHex } from "../format";
   import type { IoRegister, MachineKind } from "../types";
 
   let {
@@ -29,16 +31,8 @@
     }
   });
 
-  function fmtAddr(a: number) {
-    return `$${a.toString(16).toUpperCase().padStart(4, "0")}`;
-  }
-
-  function fmtValue(v: number) {
-    return `$${v.toString(16).toUpperCase().padStart(2, "0")}`;
-  }
-
   function startEdit(reg: IoRegister) {
-    editing = { address: reg.address, raw: reg.value.toString(16).toUpperCase().padStart(2, "0") };
+    editing = { address: reg.address, raw: toHex(reg.value, 2) };
   }
 
   function commitEdit() {
@@ -70,14 +64,12 @@
       <span class="kind">{kindLabel}</span>
     </span>
     {#if onToggleCollapse}
-      <button class="hdr-btn collapse-btn" onclick={onToggleCollapse} title={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-label={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-expanded={!collapsed}>
-        <Icon name="chevron-down" size={13} />
-      </button>
+      <CollapseButton {collapsed} onclick={onToggleCollapse} />
     {/if}
   </div>
   <div class="panel-body io-list">
     {#if registers.length === 0}
-      <div class="empty">{$t("machine.ioEmpty")}</div>
+      <EmptyState icon="io" message={$t("machine.ioEmpty")} />
     {:else}
       {#each registers as reg}
         <div class="io-entry">
@@ -102,7 +94,7 @@
               onclick={() => startEdit(reg)}
               title={$t("machine.ioEdit")}
             >
-              {fmtValue(reg.value)}
+              {fmtByte(reg.value)}
             </button>
           {/if}
         </div>
@@ -128,15 +120,6 @@
     min-width: 0;
   }
 
-  .collapse-btn :global(.icon) {
-    transition: transform var(--motion-normal) var(--ease-tactile);
-    margin-right: 0;
-  }
-
-  .io-panel.collapsed .collapse-btn :global(.icon) {
-    transform: rotate(-90deg);
-  }
-
   .kind {
     font-size: 10px;
     color: var(--text-faint);
@@ -151,13 +134,6 @@
     max-height: none;
     overflow: auto;
     min-height: 0;
-  }
-
-  .empty {
-    padding: 12px;
-    color: var(--text-dim);
-    text-align: center;
-    font-size: 11px;
   }
 
   .io-entry {

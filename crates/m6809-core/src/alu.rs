@@ -90,7 +90,8 @@ pub fn or16(a: u16, b: u16, flags: &mut Flags) -> u16 {
 
 pub fn bit16(a: u16, b: u16, flags: &mut Flags) {
     let result = a & b;
-    flags.remove(Flags::V | Flags::C);
+    // Motorola BIT: V cleared; C not affected.
+    flags.remove(Flags::V);
     flags.set_nz16(result);
 }
 
@@ -158,6 +159,7 @@ pub fn neg16(value: u16, flags: &mut Flags) -> u16 {
 
 pub fn com16(value: u16, flags: &mut Flags) -> u16 {
     let result = !value;
+    flags.remove(Flags::V);
     flags.insert(Flags::C);
     flags.set_nz16(result);
     result
@@ -208,7 +210,8 @@ pub fn ror16(value: u16, flags: &mut Flags) -> u16 {
 }
 
 pub fn tst16(value: u16, flags: &mut Flags) {
-    flags.remove(Flags::V | Flags::C);
+    // Motorola TST: V cleared; C not affected.
+    flags.remove(Flags::V);
     flags.set_nz16(value);
 }
 

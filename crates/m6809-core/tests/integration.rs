@@ -304,14 +304,84 @@ fn daa_after_addition() {
 // ── LEA ─────────────────────────────────────────────────────────────
 
 #[test]
-fn leax_leay_dont_affect_cc() {
+fn leax_sets_z_from_effective_address() {
+    // LEAX 5,U with U=0 → X=5, Z cleared (Motorola LEAX sets Z)
     let mut emu = emu_with_program(&[
-        0xCE, 0x00, 0x00, // LDU #$0000 (sets Z)
-        0x30, 0x45,       // LEAX 5,U  (X = 5, should NOT clear Z)
+        0xCE, 0x00, 0x00, // LDU #$0000
+        0x30, 0x45,       // LEAX 5,U
     ]);
-    emu.step(); emu.step();
+    emu.step();
+    emu.step();
     assert_eq!(emu.cpu.x, 0x0005);
-    assert!(emu.cpu.cc.contains(m6809_core::Flags::Z)); // Z still set
+    assert!(!emu.cpu.cc.contains(m6809_core::Flags::Z));
+
+    // LEAX ,X with X=0 → Z set
+    let mut emu2 = emu_with_program(&[0x30, 0x84]); // LEAX ,X
+    emu2.cpu.x = 0;
+    emu2.cpu.cc.remove(m6809_core::Flags::Z);
+    emu2.step();
+    assert_eq!(emu2.cpu.x, 0);
+    assert!(emu2.cpu.cc.contains(m6809_core::Flags::Z));
+}
+
+#[test]
+fn leas_leay_z_and_leas_no_z() {
+    // LEAY sets Z; LEAS does not touch Z
+    let mut emu = emu_with_program(&[
+        0xCE, 0x00, 0x00, // LDU #$0000
+        0x31, 0xC4,       // LEAY ,U  → Y=0, Z set
+        0x1A, 0x04,       // ORCC #$04 set Z
+        0x32, 0x45,       // LEAS 5,U → S=5, Z must remain set
+    ]);
+    emu.step();
+    emu.step();
+    assert_eq!(emu.cpu.y, 0);
+    assert!(emu.cpu.cc.contains(m6809_core::Flags::Z));
+    emu.step();
+    emu.step();
+    assert_eq!(emu.cpu.s, 5);
+    assert!(emu.cpu.cc.contains(m6809_core::Flags::Z));
+}
+
+#[test]
+fn clr_direct_sets_flags() {
+    let mut emu = emu_with_program(&[0x0F, 0x50]); // CLR <$50
+    emu.memory.write8(0x0050, 0xFF);
+    emu.cpu.cc = m6809_core::Flags::from_bits_truncate(0x0B); // N V C
+    emu.step();
+    assert_eq!(emu.memory.read8(0x0050), 0x00);
+    assert!(!emu.cpu.cc.contains(m6809_core::Flags::N));
+    assert!(emu.cpu.cc.contains(m6809_core::Flags::Z));
+    assert!(!emu.cpu.cc.contains(m6809_core::Flags::V));
+    assert!(!emu.cpu.cc.contains(m6809_core::Flags::C));
+}
+
+#[test]
+fn sex_sets_nz_from_d() {
+    let mut emu = emu_with_program(&[0xC6, 0x80, 0x1D]); // LDB #$80, SEX
+    emu.step();
+    emu.step();
+    assert_eq!(emu.cpu.a, 0xFF);
+    assert!(emu.cpu.cc.contains(m6809_core::Flags::N));
+    assert!(!emu.cpu.cc.contains(m6809_core::Flags::Z));
+
+    let mut emu2 = emu_with_program(&[0xC6, 0x00, 0x1D]); // LDB #0, SEX
+    emu2.step();
+    emu2.step();
+    assert_eq!(emu2.cpu.a, 0x00);
+    assert!(!emu2.cpu.cc.contains(m6809_core::Flags::N));
+    assert!(emu2.cpu.cc.contains(m6809_core::Flags::Z));
+}
+
+#[test]
+fn tst_preserves_carry() {
+    let mut emu = emu_with_program(&[0x86, 0x01, 0x1A, 0x01, 0x4D]); // LDA #1, ORCC #C, TSTA
+    emu.step();
+    emu.step();
+    emu.step();
+    assert!(emu.cpu.cc.contains(m6809_core::Flags::C));
+    assert!(!emu.cpu.cc.contains(m6809_core::Flags::Z));
+    assert!(!emu.cpu.cc.contains(m6809_core::Flags::V));
 }
 
 // ── Halt / SWI ──────────────────────────────────────────────────────

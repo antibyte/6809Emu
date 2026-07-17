@@ -58,12 +58,12 @@
   }
 
   .splitter.vertical {
-    width: 10px;
+    width: var(--splitter-w);
     cursor: col-resize;
   }
 
   .splitter.horizontal {
-    height: 10px;
+    height: var(--splitter-w);
     width: 100%;
     cursor: row-resize;
   }

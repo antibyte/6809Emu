@@ -60,9 +60,20 @@ pub fn run() {
             commands::acia_send_input_cmd,
             commands::acia_run_steps_cmd,
             commands::acia_send_and_run_cmd,
+            commands::clear_acia_terminal_cmd,
             commands::set_machine_profile,
+            commands::machine_key_event,
+            commands::machine_keys_clear,
             commands::get_cpu_variant,
             commands::set_cpu_variant,
+            commands::get_pia_config_cmd,
+            commands::set_pia_config_cmd,
+            commands::get_pia_state_cmd,
+            commands::set_pia_input_cmd,
+            commands::get_ay_config_cmd,
+            commands::set_ay_config_cmd,
+            commands::get_ay_state_cmd,
+            commands::set_ay_port_input_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

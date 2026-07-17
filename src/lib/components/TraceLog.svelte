@@ -2,6 +2,8 @@
   import type { TraceEntry } from "../types";
   import { t } from "../i18n";
   import Icon from "./Icon.svelte";
+  import EmptyState from "./EmptyState.svelte";
+  import { fmtAddr } from "../format";
 
   let {
     entries,
@@ -18,10 +20,6 @@
     onNavigate: (addr: number) => void;
     onClose?: () => void;
   } = $props();
-
-  function fmtAddr(a: number) {
-    return `$${a.toString(16).toUpperCase().padStart(4, "0")}`;
-  }
 
   // Newest first; show delta cycles vs the previous (older) entry.
   const reversed = $derived([...entries].reverse());
@@ -62,7 +60,7 @@
   </div>
   <div class="panel-body trace-list">
     {#if rows.length === 0}
-      <div class="empty-line"><Icon name="trace" size={12} /> {$t("trace.empty")}</div>
+      <EmptyState icon="trace" message={$t("trace.empty")} />
     {:else}
       <div class="row header">
         <span class="pc-h">{$t("status.pc")}</span>

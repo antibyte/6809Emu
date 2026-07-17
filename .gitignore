@@ -7,3 +7,5 @@ src-tauri/target/
 .DS_Store
 Thumbs.db
 .tauri-dev.lock
+# Staging downloads (embedded copies live under crates/m6809-machine/roms/)
+/roms/

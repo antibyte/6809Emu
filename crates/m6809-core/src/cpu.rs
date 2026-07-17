@@ -628,6 +628,8 @@ impl Cpu {
         ctx.cycles = 3;
         ctx.mnemonic = "SEX".into();
         self.a = if self.b & 0x80 != 0 { 0xFF } else { 0x00 };
+        // N/Z from the 16-bit result in D (Motorola SEX).
+        self.cc.set_nz16(self.get_reg16(Reg16::D));
     }
 
     fn exec_cwai(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
@@ -793,7 +795,8 @@ impl Cpu {
     }
 
     fn op_tst8(&mut self, value: u8) {
-        self.cc.remove(Flags::V | Flags::C);
+        // Motorola: V cleared; C not affected.
+        self.cc.remove(Flags::V);
         self.cc.set_nz8(value);
     }
 
@@ -820,7 +823,7 @@ impl Cpu {
             0x0C => self.op_mem_unary(mem, ctx, "INC", AddrMode::Direct, 6, |cpu, v| cpu.op_inc8(v)),
             0x0D => self.op_mem_test(mem, ctx, "TST", AddrMode::Direct, 6),
             0x0E => self.op_jmp(mem, ctx, "JMP", AddrMode::Direct, 3),
-            0x0F => self.op_mem_store(mem, ctx, "CLR", AddrMode::Direct, 6, |_| 0),
+            0x0F => self.op_mem_store(mem, ctx, "CLR", AddrMode::Direct, 6, |cpu| cpu.op_clr8()),
 
             0x12 => self.exec_nop(ctx),
             0x13 => self.exec_sync(ctx),
@@ -934,7 +937,7 @@ impl Cpu {
             0x6C => self.op_mem_unary(mem, ctx, "INC", AddrMode::Indexed, 6, |cpu, v| cpu.op_inc8(v)),
             0x6D => self.op_mem_test(mem, ctx, "TST", AddrMode::Indexed, 6),
             0x6E => self.op_jmp(mem, ctx, "JMP", AddrMode::Indexed, 3),
-            0x6F => self.op_mem_store(mem, ctx, "CLR", AddrMode::Indexed, 6, |_| 0),
+            0x6F => self.op_mem_store(mem, ctx, "CLR", AddrMode::Indexed, 6, |cpu| cpu.op_clr8()),
 
             0x70 => self.op_mem_unary(mem, ctx, "NEG", AddrMode::Extended, 7, |cpu, v| cpu.op_neg8(v)),
             0x73 => self.op_mem_unary(mem, ctx, "COM", AddrMode::Extended, 7, |cpu, v| cpu.op_com8(v)),
@@ -947,7 +950,7 @@ impl Cpu {
             0x7C => self.op_mem_unary(mem, ctx, "INC", AddrMode::Extended, 7, |cpu, v| cpu.op_inc8(v)),
             0x7D => self.op_mem_test(mem, ctx, "TST", AddrMode::Extended, 7),
             0x7E => self.op_jmp(mem, ctx, "JMP", AddrMode::Extended, 3),
-            0x7F => self.op_mem_store(mem, ctx, "CLR", AddrMode::Extended, 7, |_| 0),
+            0x7F => self.op_mem_store(mem, ctx, "CLR", AddrMode::Extended, 7, |cpu| cpu.op_clr8()),
 
             0x80 => self.op_alu8_imm(mem, ctx, "SUBA", Reg8::A, |a, b, f| { sub8(a, b, false, f); a.wrapping_sub(b) }),
             0x81 => self.op_alu8_imm(mem, ctx, "CMPA", Reg8::A, |a, b, f| { cmp8(a, b, f); a }),
@@ -1895,6 +1898,13 @@ impl Cpu {
     pub(crate) fn op_lea(&mut self, mem: &mut Memory, ctx: &mut StepCtx, dest: Reg16) {
         let (addr, extra, operand) = self.addr_indexed(mem, ctx);
         self.set_reg16(dest, addr);
+        // LEAX/LEAY set Z (6800 INX/DEX compat); LEAS/LEAU leave CC alone.
+        match dest {
+            Reg16::X | Reg16::Y => {
+                self.cc.set(Flags::Z, addr == 0);
+            }
+            _ => {}
+        }
         ctx.cycles = 4 + extra as u32;
         ctx.mnemonic = match dest {
             Reg16::X => "LEAX",
@@ -2071,6 +2081,10 @@ impl Cpu {
         };
         self.write_tfr_reg(dst_code, reg1);
         self.write_tfr_reg(src_code, reg2);
+        // Any write to S (including EXG) arms NMI after reset, same as LDS/TFR.
+        if src_code == 4 || dst_code == 4 {
+            self.lds_encountered = true;
+        }
         ctx.cycles = if self.is_hd6309() { 7 } else { 8 };
         ctx.mnemonic = "EXG".into();
         ctx.operands = format!(

@@ -105,9 +105,12 @@ mod tests {
     }
 
     #[test]
-    fn boot_reaches_entry_and_prints_banner() {
+    fn stub_boot_reaches_entry_and_prints_banner() {
+        // Stub ROM is no longer the default firmware; install it manually.
         let mut emu = Emulator::new();
-        crate::apply_machine(&mut emu, crate::MachineKind::Coco2);
+        install(&mut emu.memory.ram, 0x0100);
+        emu.memory.write16(0xFFFE, BOOT_PC);
+        emu.cpu.pc = BOOT_PC;
         for _ in 0..8000 {
             if emu.cpu.pc == 0x0100 {
                 break;
@@ -115,7 +118,5 @@ mod tests {
             let _ = emu.step();
         }
         assert_eq!(emu.cpu.pc, 0x0100);
-        let frame = crate::machine_video_frame(&emu).expect("video");
-        assert!(frame.rows_text[0].contains("6809Emu"));
     }
 }

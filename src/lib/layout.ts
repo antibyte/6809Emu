@@ -17,9 +17,17 @@ export type PanelId =
   | "memory"
   | "trace"
   | "terminal"
-  | "video";
+  | "video"
+  | "pia"
+  | "ay";
 
-export type SidebarSection = "registers" | "io" | "breakpoints" | "watchpoints";
+export type SidebarSection =
+  | "registers"
+  | "io"
+  | "breakpoints"
+  | "watchpoints"
+  | "pia"
+  | "ay";
 
 export interface LayoutSizes {
   mainPct: number;
@@ -54,12 +62,16 @@ const DEFAULT: LayoutState = {
     trace: true,
     terminal: true,
     video: false,
+    pia: false,
+    ay: false,
   },
   collapsed: {
     registers: false,
     io: false,
     breakpoints: false,
     watchpoints: false,
+    pia: false,
+    ay: false,
   },
   videoDocked: true,
   sizes: {
@@ -67,7 +79,7 @@ const DEFAULT: LayoutState = {
     sidebarPx: 290,
     disasmPct: 52,
     bottom: { memory: 40, trace: 34, terminal: 26 },
-    sidebarRows: { registers: 34, io: 22, breakpoints: 22, watchpoints: 22 },
+    sidebarRows: { registers: 34, io: 22, breakpoints: 22, watchpoints: 22, pia: 28, ay: 28 },
     videoPx: 360,
   },
 };
@@ -105,7 +117,7 @@ function sanitize(raw: Partial<LayoutState> | null): LayoutState {
       }
     }
     if (sz.sidebarRows) {
-      for (const k of ["registers", "io", "breakpoints", "watchpoints"] as const) {
+      for (const k of ["registers", "io", "breakpoints", "watchpoints", "pia", "ay"] as const) {
         if (typeof sz.sidebarRows[k] === "number") s.sizes.sidebarRows[k] = clamp(sz.sidebarRows[k], 6, 80);
       }
     }

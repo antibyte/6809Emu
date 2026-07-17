@@ -1376,7 +1376,8 @@ impl Cpu {
     }
 
     fn op_e_tst(&mut self, ctx: &mut StepCtx) {
-        self.cc.remove(Flags::V | Flags::C);
+        // Motorola TST: V cleared; C not affected.
+        self.cc.remove(Flags::V);
         self.cc.set_nz8(self.get_e());
         ctx.cycles = 3;
         ctx.mnemonic = "TSTE".into();
@@ -1384,7 +1385,8 @@ impl Cpu {
     }
 
     fn op_f_tst(&mut self, ctx: &mut StepCtx) {
-        self.cc.remove(Flags::V | Flags::C);
+        // Motorola TST: V cleared; C not affected.
+        self.cc.remove(Flags::V);
         self.cc.set_nz8(self.get_f());
         ctx.cycles = 3;
         ctx.mnemonic = "TSTF".into();

@@ -94,6 +94,9 @@
   --panel-header-h: 30px;
   --row-h: 22px;
 
+  /* Splitter width — wider on touch for easier grabbing */
+  --splitter-w: 10px;
+
   --shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border);
   --ring: 0 0 0 2px var(--accent-soft);
@@ -597,6 +600,10 @@ select {
 
 /* Touch-friendly sizing on coarse pointer devices */
 @media (pointer: coarse) {
+  :root {
+    --splitter-w: 18px;
+  }
+
   button {
     min-height: 36px;
   }

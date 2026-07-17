@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from "../i18n";
   import Icon from "./Icon.svelte";
+  import { fmtAddr } from "../format";
   import type { VideoFrame } from "../types";
 
   let {
@@ -15,12 +16,10 @@
     onGoto: (addr: number) => void;
   } = $props();
 
-  function fmtAddr(a: number) {
-    return `$${a.toString(16).toUpperCase().padStart(4, "0")}`;
-  }
-
   function modeLabel(mode: string): string {
-    return mode.replace(/([a-z])([0-9])/g, "$1 $2").replace(/x/g, "×");
+    return mode
+      .replace(/([A-Za-z])(\d)/g, "$1 $2")
+      .replace(/(\d)x(\d)/gi, "$1×$2");
   }
 
   const displayRows = $derived(
@@ -31,11 +30,11 @@
             frame.cells
               .slice(row * frame.cols, (row + 1) * frame.cols)
               .map((cell) => {
+                if (cell & 0x80) return "\u00b7";
                 if (cell === 0 || cell === 0xff) return " ";
-                const code = cell & 0x7f;
-                return code >= 0x20 && code < 0x7f
-                  ? String.fromCharCode(code)
-                  : "\u00b7";
+                const code = cell & 0x3f;
+                if (code < 0x20) return String.fromCharCode(code + 0x40);
+                return String.fromCharCode(code);
               })
               .join("")
           )
@@ -59,14 +58,25 @@
     return displayRows.slice(0, Math.max(end, 1));
   });
 
-  const displayCols = $derived(
-    visibleRows.length > 0
-      ? Math.max(...visibleRows.map((row) => row.length), frame?.cols ?? 0)
-      : (frame?.cols ?? 32)
+  const displayCols = $derived(frame?.cols ?? 32);
+  const displayRowCount = $derived(
+    frame?.mode === "Text32x16" || frame?.mode === "Semigraphics4" || frame?.mode === "Semigraphics6"
+      ? (frame?.rows ?? 16)
+      : Math.max(visibleRows.length, 1)
   );
 
-  const displayRowCount = $derived(visibleRows.length);
-  const screenText = $derived(visibleRows.join("\n"));
+  const screenText = $derived.by(() => {
+    const cols = displayCols;
+    const rows = displayRowCount;
+    const out: string[] = [];
+    for (let r = 0; r < rows; r++) {
+      let line = visibleRows[r] ?? "";
+      if (line.length < cols) line = line.padEnd(cols, " ");
+      else if (line.length > cols) line = line.slice(0, cols);
+      out.push(line);
+    }
+    return out.join("\n");
+  });
 
   function handleKeydown(event: KeyboardEvent) {
     if (open && event.key === "Escape") {
@@ -310,23 +320,29 @@
   }
 
   .screen {
-    --line-ratio: 1.35;
+    --line-ratio: 1.2;
     position: relative;
     margin: 0;
+    box-sizing: content-box;
+    font-family: var(--font-mono), ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-weight: 500;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0;
+    letter-spacing: 0;
     font-size: min(
-      24px,
-      calc((min(90vw, 720px) - 2.5rem) / var(--cols)),
-      calc((min(70vh, 520px) - 2.5rem) / var(--rows) / var(--line-ratio))
+      22px,
+      calc((min(90vw, 720px) - 3rem) / var(--cols)),
+      calc((min(70vh, 520px) - 3rem) / var(--rows) / var(--line-ratio))
     );
     line-height: var(--line-ratio);
     color: var(--crt-phosphor);
     background: transparent;
-    text-shadow: 0 0 6px var(--crt-glow);
+    text-shadow: 0 0 5px var(--crt-glow);
     border: 1px solid var(--crt-border);
     border-radius: 6px;
-    padding: 1.1em 1.25em;
+    padding: 0.45em 0.55em;
     white-space: pre;
-    width: calc(var(--cols) * 1ch + 2.5em);
+    width: calc(var(--cols) * 1ch);
     max-width: calc(100vw - 4rem);
     overflow: hidden;
   }

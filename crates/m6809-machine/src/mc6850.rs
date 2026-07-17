@@ -61,6 +61,7 @@ struct AciaState {
     rx_queue: VecDeque<u8>,
     rx_pending: Option<RxJob>,
     tx_pending: Option<TxJob>,
+    tx_queue: VecDeque<u8>,
     tx_history: Vec<u8>,
     irq_latched: bool,
 }
@@ -182,6 +183,13 @@ impl Acia6850 {
                 let byte = job.byte;
                 state.tx_pending = None;
                 push_tx_history(&mut state, byte);
+                // start next queued tx if any
+                if let Some(next) = state.tx_queue.pop_front() {
+                    state.tx_pending = Some(TxJob {
+                        byte: next,
+                        cycles_left: cycles_per_byte(&self.config),
+                    });
+                }
             }
         }
 
@@ -190,7 +198,7 @@ impl Acia6850 {
             if job.cycles_left == 0 {
                 let byte = job.byte;
                 state.rx_pending = None;
-                state.rx_queue.push_back(byte);
+                state.rx_queue.push_front(byte);
             }
         }
 
@@ -242,6 +250,11 @@ impl Acia6850 {
         }
     }
 
+    pub fn clear_terminal(&self) {
+        let mut state = self.state.borrow_mut();
+        state.tx_history.clear();
+    }
+
     pub fn io_registers(&self) -> Vec<IoRegisterView> {
         if !self.config.enabled {
             return Vec::new();
@@ -274,13 +287,13 @@ impl Acia6850 {
 
     fn write_data(&self, value: u8) {
         let mut state = self.state.borrow_mut();
-        if !tdre(&state) {
-            return;
+        let delay = cycles_per_byte(&self.config);
+        state.tx_queue.push_back(value);
+        if state.tx_pending.is_none() {
+            if let Some(byte) = state.tx_queue.pop_front() {
+                state.tx_pending = Some(TxJob { byte, cycles_left: delay });
+            }
         }
-        state.tx_pending = Some(TxJob {
-            byte: value,
-            cycles_left: cycles_per_byte(&self.config),
-        });
         let control = state.control;
         update_irq(&mut state, &self.config, control);
     }
@@ -292,6 +305,7 @@ impl Acia6850 {
             state.rx_queue.clear();
             state.rx_pending = None;
             state.tx_pending = None;
+            state.tx_queue.clear();
             state.irq_latched = false;
             return;
         }
@@ -305,6 +319,7 @@ impl Acia6850 {
         state.rx_queue.clear();
         state.rx_pending = None;
         state.tx_pending = None;
+        state.tx_queue.clear();
         state.irq_latched = false;
         state.tx_history.clear();
     }

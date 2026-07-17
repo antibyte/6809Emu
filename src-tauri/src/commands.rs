@@ -4,14 +4,18 @@ use std::sync::Arc;
 use m6809_asm::{assemble, disassemble_with_variant, DisassembledInsn};
 use m6809_core::{CpuState, CpuVariant, EmulatorSnapshot, LoadConfig, StepResult};
 use m6809_machine::{
-    acia_send_input, apply_machine, get_acia_config, get_acia_terminal, list_machines,
-    machine_state, machine_video_frame, restore_machine_io, set_acia_config, AciaConfig,
-    AciaTerminalDto, MachineInfo, MachineKind, MachineStateDto, VideoFrameDto,
+    acia_send_input, apply_machine, ay_set_port_input, ay_take_samples, clear_acia_terminal,
+    get_acia_config, get_acia_terminal, get_ay_config, get_ay_state, get_pia_config, get_pia_state,
+    list_machines, machine_clear_keys, machine_host_key, machine_state, machine_video_frame,
+    restore_machine_io, set_acia_config, set_ay_config, set_pia_config, set_pia_input, AciaConfig,
+    AciaTerminalDto, AyConfig, AyStateDto, MachineInfo, MachineKind, MachineStateDto, PiaConfig,
+    PiaStateDto, VideoFrameDto, AUDIO_SAMPLE_RATE,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle, Emitter, State};
 
 use crate::state::{AppState, RunSpeed};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MemoryChunk {
@@ -24,6 +28,9 @@ pub struct AssembleResult {
     pub origin: u16,
     pub bytes: Vec<u8>,
     pub errors: Vec<AsmErrorDto>,
+    /// Maps the 1-based source line number to the address of the code emitted
+    /// by that line, so the UI can set breakpoints on source lines.
+    pub line_map: std::collections::HashMap<u32, u16>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,10 +74,38 @@ pub async fn run_emulator(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
 
     let state = state.inner().clone();
     async_runtime::spawn(async move {
+        // Prime so the first chunk covers a full UI frame (builds a small lead).
+        let mut last_audio_at = Instant::now()
+            - Duration::from_millis(
+                state
+                    .run_speed
+                    .lock()
+                    .map(|s| s.frame_ms)
+                    .unwrap_or(50),
+            );
+
         loop {
             if !state.running.load(Ordering::SeqCst) {
                 break;
             }
+
+            let frame_start = Instant::now();
+            let speed = state
+                .run_speed
+                .lock()
+                .map(|s| s.clone())
+                .unwrap_or_default();
+            let frame_ms = speed.frame_ms.max(1);
+
+            // Match audio length to real wall time since the last chunk so
+            // work+IPC overhead cannot starve the stream (that sounded "choppy").
+            let elapsed = frame_start.saturating_duration_since(last_audio_at);
+            let mut target_samples =
+                ((elapsed.as_secs_f64() * f64::from(AUDIO_SAMPLE_RATE)).round() as usize).max(1);
+            // Clamp: 5 ms .. 100 ms per emit (keeps IPC and latency bounded).
+            let min_samples = (AUDIO_SAMPLE_RATE as usize) / 200;
+            let max_samples = (AUDIO_SAMPLE_RATE as usize) / 10;
+            target_samples = target_samples.clamp(min_samples, max_samples);
 
             let tick = {
                 let mut emu = match state.emulator.lock() {
@@ -82,12 +117,6 @@ pub async fn run_emulator(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
                     state.running.store(false, Ordering::SeqCst);
                     break;
                 }
-
-                let speed = state
-                    .run_speed
-                    .lock()
-                    .map(|s| s.clone())
-                    .unwrap_or_default();
 
                 let mut last = None;
                 for _ in 0..speed.steps_per_tick {
@@ -103,18 +132,22 @@ pub async fn run_emulator(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
                     }
                 }
 
-                last.map(|result| (result, emu.get_state()))
+                let audio = ay_take_samples(&mut emu, target_samples);
+                last.map(|result| (result, emu.get_state(), audio))
             };
 
-            if let Some((result, cpu_state)) = tick {
+            last_audio_at = frame_start;
+
+            if let Some((result, cpu_state, audio)) = tick {
                 state.push_trace(result.clone());
-                let _ = app.emit(
-                    "emulator-tick",
-                    serde_json::json!({
-                        "step": result,
-                        "cpu": cpu_state,
-                    }),
-                );
+                let mut payload = serde_json::json!({
+                    "step": result,
+                    "cpu": cpu_state,
+                });
+                if !audio.is_empty() {
+                    payload["ay_audio"] = serde_json::json!(audio);
+                }
+                let _ = app.emit("emulator-tick", payload);
             } else {
                 break;
             }
@@ -123,12 +156,13 @@ pub async fn run_emulator(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
                 break;
             }
 
-            let frame_ms = state
-                .run_speed
-                .lock()
-                .map(|s| s.frame_ms)
-                .unwrap_or(50);
-            tokio::time::sleep(std::time::Duration::from_millis(frame_ms)).await;
+            // Sleep only the remainder of the frame budget (never sleep full
+            // frame_ms on top of work time — that was the main underrun source).
+            let deadline = frame_start + Duration::from_millis(frame_ms);
+            let now = Instant::now();
+            if deadline > now {
+                tokio::time::sleep(deadline - now).await;
+            }
         }
 
         state.running.store(false, Ordering::SeqCst);
@@ -240,6 +274,11 @@ pub fn assemble_source(
                 origin: program.origin,
                 bytes: program.bytes,
                 errors: vec![],
+                line_map: program
+                    .line_map
+                    .into_iter()
+                    .map(|(line, addr)| (line as u32, addr))
+                    .collect(),
             })
         }
         Err(error) => Ok(AssembleResult {
@@ -249,6 +288,7 @@ pub fn assemble_source(
                 line: error.line,
                 message: error.message,
             }],
+            line_map: std::collections::HashMap::new(),
         }),
     }
 }
@@ -595,6 +635,95 @@ pub fn acia_send_and_run_cmd(
     Ok(get_acia_terminal(&emu))
 }
 
+#[tauri::command]
+pub fn clear_acia_terminal_cmd(state: State<'_, Arc<AppState>>) -> Result<AciaTerminalDto, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    clear_acia_terminal(&emu);
+    Ok(get_acia_terminal(&emu))
+}
+
+#[tauri::command]
+pub fn get_pia_config_cmd(state: State<'_, Arc<AppState>>) -> Result<Option<PiaConfig>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(get_pia_config(&emu))
+}
+
+#[tauri::command]
+pub fn set_pia_config_cmd(
+    config: PiaConfig,
+    state: State<'_, Arc<AppState>>,
+) -> Result<MachineStateDto, String> {
+    state.running.store(false, Ordering::SeqCst);
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    set_pia_config(&mut emu, config);
+    Ok(machine_state(&emu))
+}
+
+#[tauri::command]
+pub fn get_pia_state_cmd(state: State<'_, Arc<AppState>>) -> Result<Option<PiaStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(get_pia_state(&emu))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetPiaInputDto {
+    pub port: String,
+    pub bit: u8,
+    pub on: bool,
+}
+
+#[tauri::command]
+pub fn set_pia_input_cmd(
+    dto: SetPiaInputDto,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<PiaStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    set_pia_input(&emu, &dto.port, dto.bit, dto.on);
+    Ok(get_pia_state(&emu))
+}
+
+// ---- AY-3-8910 commands ----
+
+#[tauri::command]
+pub fn get_ay_config_cmd(state: State<'_, Arc<AppState>>) -> Result<AyConfig, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(get_ay_config(&emu))
+}
+
+#[tauri::command]
+pub fn set_ay_config_cmd(
+    config: AyConfig,
+    state: State<'_, Arc<AppState>>,
+) -> Result<MachineStateDto, String> {
+    state.running.store(false, Ordering::SeqCst);
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    set_ay_config(&mut emu, config);
+    Ok(machine_state(&emu))
+}
+
+#[tauri::command]
+pub fn get_ay_state_cmd(state: State<'_, Arc<AppState>>) -> Result<Option<AyStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(get_ay_state(&emu))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetAyPortInputDto {
+    pub port: String,
+    pub value: u8,
+}
+
+#[tauri::command]
+pub fn set_ay_port_input_cmd(
+    dto: SetAyPortInputDto,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<AyStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    let port = dto.port.chars().next().unwrap_or('a');
+    ay_set_port_input(&emu, port, dto.value);
+    Ok(get_ay_state(&emu))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SetCpuVariantDto {
     pub variant: CpuVariant,
@@ -633,6 +762,24 @@ pub fn set_machine_profile(
         load_config,
         machine,
     })
+}
+
+#[tauri::command]
+pub fn machine_key_event(
+    code: String,
+    down: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    machine_host_key(&mut emu, &code, down);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn machine_keys_clear(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    machine_clear_keys(&mut emu);
+    Ok(())
 }
 
 #[tauri::command]

@@ -56,6 +56,7 @@ export interface TickPayload {
   step: StepResult;
   cpu: CpuState;
   steps?: number;
+  ay_audio?: number[];
 }
 
 export interface TraceEntry extends StepResult {
@@ -92,10 +93,62 @@ export interface AciaTerminalState {
   irq: boolean;
 }
 
+export interface FirmwareRegion {
+  name: string;
+  address: number;
+  size: number;
+}
+
+export interface FirmwareInfo {
+  kind: MachineKind;
+  name: string;
+  present: boolean;
+  reset_pc: number;
+  regions: FirmwareRegion[];
+}
+
 export interface MachineState {
   kind: MachineKind;
   io_registers: IoRegister[];
   acia: AciaConfig;
+  pia: PiaConfig | null;
+  ay: AyConfig;
+  firmware?: FirmwareInfo | null;
+}
+
+export interface PiaConfig {
+  enabled: boolean;
+  base_addr: number;
+}
+
+export interface PiaState {
+  config: PiaConfig;
+  ddra: number;
+  ddrb: number;
+  ora: number;
+  orb: number;
+  ira: number;
+  irb: number;
+  cra: number;
+  crb: number;
+  port_a_read: number;
+  port_b_read: number;
+  irq_a: boolean;
+  irq_b: boolean;
+}
+
+export interface AyConfig {
+  enabled: boolean;
+  base_addr: number;
+  chip_clock_hz: number;
+}
+
+export interface AyState {
+  config: AyConfig;
+  registers: number[];
+  selected_register: number;
+  port_a_in: number;
+  port_b_in: number;
 }
 
 export interface VideoFrame {

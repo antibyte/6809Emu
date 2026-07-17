@@ -7,9 +7,13 @@ import type {
   CpuVariant,
   AciaConfig,
   AciaTerminalState,
+  AyConfig,
+  AyState,
   MachineInfo,
   MachineKind,
   MachineState,
+  PiaConfig,
+  PiaState,
   VideoFrame,
   StepResult,
   TickPayload,
@@ -69,6 +73,7 @@ export async function assembleSource(
     origin: number;
     bytes: number[];
     errors: { line: number; message: string }[];
+    lineMap: Record<number, number>;
   }>("assemble_source", { source, origin, writeToMemory });
 }
 
@@ -330,8 +335,20 @@ export async function aciaSendAndRun(
   return invoke("acia_send_and_run_cmd", { text, steps });
 }
 
+export async function clearAciaTerminal(): Promise<AciaTerminalState> {
+  return invoke("clear_acia_terminal_cmd");
+}
+
 export async function setMachineProfile(kind: MachineKind): Promise<SetMachineResult> {
   return invoke("set_machine_profile", { dto: { kind } });
+}
+
+export async function machineKeyEvent(code: string, down: boolean): Promise<void> {
+  return invoke("machine_key_event", { code, down });
+}
+
+export async function machineKeysClear(): Promise<void> {
+  return invoke("machine_keys_clear");
 }
 
 export async function getCpuVariant(): Promise<CpuVariant> {
@@ -340,6 +357,47 @@ export async function getCpuVariant(): Promise<CpuVariant> {
 
 export async function setCpuVariant(variant: CpuVariant): Promise<CpuState> {
   return invoke("set_cpu_variant", { dto: { variant } });
+}
+
+export async function getPiaConfig(): Promise<PiaConfig | null> {
+  return invoke("get_pia_config_cmd");
+}
+
+export async function setPiaConfig(config: PiaConfig): Promise<MachineState> {
+  return invoke("set_pia_config_cmd", { config });
+}
+
+export async function getPiaState(): Promise<PiaState | null> {
+  return invoke("get_pia_state_cmd");
+}
+
+export async function setPiaInput(
+  port: "a" | "b",
+  bit: number,
+  on: boolean
+): Promise<PiaState | null> {
+  return invoke("set_pia_input_cmd", { dto: { port, bit, on } });
+}
+
+// ---- AY-3-8910 ----
+
+export async function getAyConfig(): Promise<AyConfig> {
+  return invoke("get_ay_config_cmd");
+}
+
+export async function setAyConfig(config: AyConfig): Promise<MachineState> {
+  return invoke("set_ay_config_cmd", { config });
+}
+
+export async function getAyState(): Promise<AyState | null> {
+  return invoke("get_ay_state_cmd");
+}
+
+export async function setAyPortInput(
+  port: "a" | "b",
+  value: number
+): Promise<AyState | null> {
+  return invoke("set_ay_port_input_cmd", { dto: { port, value } });
 }
 
 export const RUN_SPEED_PRESETS: { label: string; config: RunSpeedConfig }[] = [

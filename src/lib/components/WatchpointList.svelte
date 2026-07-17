@@ -1,6 +1,9 @@
 <script lang="ts">
   import { t } from "../i18n";
   import Icon from "./Icon.svelte";
+  import CollapseButton from "./CollapseButton.svelte";
+  import EmptyState from "./EmptyState.svelte";
+  import { fmtAddr } from "../format";
 
   let {
     addresses,
@@ -17,10 +20,6 @@
     onClearAll: () => void;
     onGoto: (addr: number) => void;
   } = $props();
-
-  function fmtAddr(a: number) {
-    return `$${a.toString(16).toUpperCase().padStart(4, "0")}`;
-  }
 </script>
 
 <div class="panel wp-panel panel-secondary" class:collapsed>
@@ -35,15 +34,13 @@
         <button class="clear-btn" onclick={onClearAll}>{$t("watchpoints.clearAll")}</button>
       {/if}
       {#if onToggleCollapse}
-        <button class="hdr-btn collapse-btn" onclick={onToggleCollapse} title={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-label={collapsed ? $t("panels.expand") : $t("panels.collapse")} aria-expanded={!collapsed}>
-          <Icon name="chevron-down" size={13} />
-        </button>
+        <CollapseButton {collapsed} onclick={onToggleCollapse} />
       {/if}
     </div>
   </div>
   <div class="panel-body wp-list">
     {#if addresses.length === 0}
-      <div class="empty-line"><Icon name="watch" size={12} /> {$t("empty.watchpoints")}</div>
+      <EmptyState icon="watch" message={$t("empty.watchpoints")} />
     {:else}
       {#each addresses as addr}
         <div class="wp-entry">
@@ -84,15 +81,6 @@
     font-size: 10px;
     color: var(--text-faint);
     font-weight: 500;
-  }
-
-  .collapse-btn :global(.icon) {
-    transition: transform var(--motion-normal) var(--ease-tactile);
-    margin-right: 0;
-  }
-
-  .wp-panel.collapsed .collapse-btn :global(.icon) {
-    transform: rotate(-90deg);
   }
 
   .clear-btn {

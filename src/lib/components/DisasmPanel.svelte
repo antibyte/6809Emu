@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { DisasmLine } from "../types";
   import { t } from "../i18n";
+  import { fmtAddr, fmtBytes } from "../format";
 
   let {
     lines,
@@ -22,16 +23,6 @@
 
   let scrollContainer: HTMLDivElement | undefined = $state();
   let menu: { x: number; y: number; addr: number } | null = $state(null);
-
-  function fmtAddr(a: number) {
-    return `$${a.toString(16).toUpperCase().padStart(4, "0")}`;
-  }
-
-  function fmtBytes(bytes: number[]) {
-    return bytes
-      .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
-      .join(" ");
-  }
 
   function openMenu(addr: number, e: MouseEvent) {
     e.preventDefault();
