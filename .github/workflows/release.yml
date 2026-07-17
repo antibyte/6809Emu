@@ -248,5 +248,11 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
 
-      - name: Run workspace tests
-        run: cargo test --workspace --all-features
+      # Skip m6809-emu (Tauri/GTK) — installers are validated by the build job.
+      - name: Run library crate tests
+        run: >
+          cargo test
+          -p m6809-core
+          -p m6809-asm
+          -p m6809-machine
+          --all-features

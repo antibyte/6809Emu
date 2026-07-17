@@ -21,12 +21,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ./
+            ./src-tauri -> target
 
-      - name: cargo test
-        run: cargo test --workspace --all-features
+      # Library crates only — src-tauri (m6809-emu) needs GTK/WebKit and is
+      # covered by the Release workflow on a fully provisioned runner.
+      - name: cargo test (core / asm / machine)
+        run: >
+          cargo test
+          -p m6809-core
+          -p m6809-asm
+          -p m6809-machine
+          --all-features
 
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo clippy (core / asm / machine)
+        run: >
+          cargo clippy
+          -p m6809-core
+          -p m6809-asm
+          -p m6809-machine
+          --all-targets
+          -- -D warnings
         continue-on-error: true
 
   frontend:
