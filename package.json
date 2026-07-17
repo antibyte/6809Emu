@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "node scripts/tauri-cli.js",
-    "tauri:dev": "node scripts/tauri-dev.js"
+    "tauri:dev": "node scripts/tauri-dev.js",
+    "release": "pwsh -File scripts/release.ps1"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",

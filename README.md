@@ -70,6 +70,34 @@ src/                 — Svelte frontend
 2. Load the **hd6309** assembler example
 3. Assemble and step — `LEAX 5,X`, `MULD`, `TFM+`, `DIVD` should work
 
+## Releases (GitHub Actions)
+
+Automated builds run on every version tag (`v*`).
+
+### One-command release (recommended)
+
+```powershell
+# bumps version files, commits, tags v0.2.0, pushes → Actions builds installers
+pwsh ./scripts/release.ps1 -Version 0.2.0
+```
+
+```bash
+./scripts/release.sh 0.2.0
+```
+
+### Manual / UI
+
+1. **Actions → Release → Run workflow** and enter a version, or  
+2. Create and push a tag:
+
+```bash
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin v0.2.0
+```
+
+Artifacts (Windows `.msi`/`.exe`, macOS `.dmg`, Linux `.AppImage`/`.deb`) appear on the
+[Releases](https://github.com/antibyte/6809Emu/releases) page when the workflow finishes.
+
 ## License
 
 MIT

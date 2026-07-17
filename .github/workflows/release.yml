@@ -1,0 +1,252 @@
+# Build signed-ready Tauri installers and publish a GitHub Release.
+#
+# Triggers:
+#   - git tag push:   v1.2.3
+#   - workflow_dispatch with optional version input
+#
+# Local helper:
+#   pwsh ./scripts/release.ps1 -Version 0.2.0
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without leading v (e.g. 0.2.0). Leave empty to use package.json."
+        required: false
+        type: string
+      draft:
+        description: "Create draft release"
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Resolve version + (on manual run) create/push a matching tag
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Prepare version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      draft: ${{ steps.meta.outputs.draft }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            INPUT="${{ inputs.version }}"
+            if [[ -n "$INPUT" ]]; then
+              VERSION="${INPUT#v}"
+            else
+              VERSION="$(node -p "require('./package.json').version")"
+            fi
+            DRAFT="${{ inputs.draft }}"
+            PRERELEASE="${{ inputs.prerelease }}"
+          else
+            # tag push: refs/tags/v1.2.3
+            RAW="${GITHUB_REF_NAME}"
+            VERSION="${RAW#v}"
+            DRAFT="false"
+            # pre-release if version has a hyphen (1.0.0-beta.1)
+            if [[ "$VERSION" == *-* ]]; then
+              PRERELEASE="true"
+            else
+              PRERELEASE="false"
+            fi
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "Invalid version: $VERSION"
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "draft=${DRAFT}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${VERSION} (tag ${TAG}, draft=${DRAFT}, prerelease=${PRERELEASE})"
+
+      - name: Ensure tag exists (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+            echo "Created and pushed tag $TAG"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Matrix build (Windows / macOS / Linux) via tauri-action
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: prepare
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            # Universal binary (Apple Silicon + Intel)
+            args: "--target universal-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ./
+            ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Sync version into package manifests
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("fs");
+          const version = process.env.VERSION;
+          for (const path of ["package.json", "src-tauri/tauri.conf.json"]) {
+            const j = JSON.parse(fs.readFileSync(path, "utf8"));
+            j.version = version;
+            fs.writeFileSync(path, JSON.stringify(j, null, 2) + "\n");
+            console.log(`updated ${path} → ${version}`);
+          }
+          // Cargo workspace.package.version
+          let cargo = fs.readFileSync("Cargo.toml", "utf8");
+          const next = cargo.replace(
+            /(\[workspace\.package\][\s\S]*?^version\s*=\s*)"[^"]+"/m,
+            `$1"${version}"`
+          );
+          if (next !== cargo) {
+            fs.writeFileSync("Cargo.toml", next);
+            console.log(`updated Cargo.toml → ${version}`);
+          } else {
+            console.warn("Cargo.toml version not patched (pattern not found)");
+          }
+          NODE
+
+      - name: Build Tauri app & upload release assets
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional code signing — set these repo secrets when ready:
+          # TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          # APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
+          # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
+        with:
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: "6809 Emulator ${{ needs.prepare.outputs.tag }}"
+          releaseBody: |
+            ## 6809 Emulator ${{ needs.prepare.outputs.tag }}
+
+            Desktop build of the MC6809 / HD6309 emulator (Tauri + Svelte).
+
+            ### Downloads
+            Installers for **Windows**, **macOS** (universal) and **Linux** are attached below.
+
+            ### Notes
+            - CoCo 2 / Dragon 32 profiles include Microsoft BASIC ROMs for private use.
+            - See the README for development setup.
+
+            **Full changelog:** https://github.com/${{ github.repository }}/compare/${{ needs.prepare.outputs.tag }}@%5E...${{ needs.prepare.outputs.tag }}
+          releaseDraft: ${{ needs.prepare.outputs.draft == 'true' }}
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          args: ${{ matrix.args }}
+          projectPath: .
+          tauriScript: npm run tauri
+          includeUpdaterJson: false
+
+  # ---------------------------------------------------------------------------
+  # Optional: run Rust tests once on Linux for the release tag
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (Linux)
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+
+      - name: Run workspace tests
+        run: cargo test --workspace --all-features
