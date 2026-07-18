@@ -797,3 +797,51 @@ impl AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Wire-format contract for assemble IPC: serde uses snake_case field names.
+    /// Frontend must read `line_map` (not camelCase `lineMap`) from the invoke result.
+    #[test]
+    fn assemble_result_serializes_line_map_snake_case() {
+        let mut line_map = HashMap::new();
+        line_map.insert(3u32, 0x0100u16);
+        let result = AssembleResult {
+            origin: 0x0100,
+            bytes: vec![0x86, 0x42],
+            errors: vec![],
+            line_map,
+        };
+        let value = serde_json::to_value(&result).expect("serialize");
+        assert!(
+            value.get("line_map").is_some(),
+            "expected snake_case line_map key, got: {value}"
+        );
+        assert!(
+            value.get("lineMap").is_none(),
+            "must not emit camelCase lineMap (frontend mismatch if UI reads lineMap)"
+        );
+        assert_eq!(value["line_map"]["3"], 0x0100);
+        assert_eq!(value["origin"], 0x0100);
+        assert_eq!(value["bytes"], serde_json::json!([0x86, 0x42]));
+    }
+
+    #[test]
+    fn assemble_error_dto_serializes_expected_fields() {
+        let result = AssembleResult {
+            origin: 0x0100,
+            bytes: vec![],
+            errors: vec![AsmErrorDto {
+                line: 4,
+                message: "unknown mnemonic".into(),
+            }],
+            line_map: HashMap::new(),
+        };
+        let value = serde_json::to_value(&result).expect("serialize");
+        assert_eq!(value["errors"][0]["line"], 4);
+        assert_eq!(value["errors"][0]["message"], "unknown mnemonic");
+    }
+}
