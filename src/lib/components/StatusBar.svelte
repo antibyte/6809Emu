@@ -6,6 +6,7 @@
   let {
     running,
     halted,
+    waiting = false,
     busy,
     pc,
     cycles,
@@ -20,6 +21,7 @@
   }: {
     running: boolean;
     halted: boolean;
+    waiting?: boolean;
     busy: boolean;
     pc: number;
     cycles: number;
@@ -33,7 +35,15 @@
     onOpenShortcuts: () => void;
   } = $props();
 
-  const stateLabel = $derived(running ? $t("statusbar.running") : halted ? $t("statusbar.halted") : $t("statusbar.ready"));
+  const stateLabel = $derived(
+    waiting
+      ? $t("statusbar.waiting")
+      : running
+        ? $t("statusbar.running")
+        : halted
+          ? $t("statusbar.halted")
+          : $t("statusbar.ready")
+  );
   const stateClass = $derived(running ? "on" : halted ? "danger" : "");
   const pcHex = $derived(fmtAddr(pc));
 </script>

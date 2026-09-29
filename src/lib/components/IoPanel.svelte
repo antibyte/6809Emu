@@ -21,7 +21,19 @@
     onWrite: (addr: number, value: number) => void;
   } = $props();
 
-  let editing: { address: number; raw: string } | null = $state(null);
+  // Keyed by row: several registers can share one bus address (AY R0-R15 are
+  // reached through the data port), so the address alone is ambiguous.
+  let editing: { index: number; address: number; raw: string } | null = $state(null);
+
+  /** Rows whose address also appears in an earlier row are views, not editable. */
+  const readOnlyRows = $derived.by(() => {
+    const seen = new Set<number>();
+    return registers.map((reg) => {
+      const duplicate = seen.has(reg.address);
+      seen.add(reg.address);
+      return duplicate;
+    });
+  });
   let editInput: HTMLInputElement | undefined = $state();
 
   $effect(() => {
@@ -31,8 +43,9 @@
     }
   });
 
-  function startEdit(reg: IoRegister) {
-    editing = { address: reg.address, raw: toHex(reg.value, 2) };
+  function startEdit(reg: IoRegister, index: number) {
+    if (readOnlyRows[index]) return;
+    editing = { index, address: reg.address, raw: toHex(reg.value, 2) };
   }
 
   function commitEdit() {
@@ -71,13 +84,13 @@
     {#if registers.length === 0}
       <EmptyState icon="io" message={$t("machine.ioEmpty")} />
     {:else}
-      {#each registers as reg}
+      {#each registers as reg, index (index)}
         <div class="io-entry">
           <button class="addr mono" onclick={() => onGoto(reg.address)} title={$t("machine.ioGoto")}>
             {fmtAddr(reg.address)}
           </button>
           <span class="name">{reg.name}</span>
-          {#if editing?.address === reg.address}
+          {#if editing?.index === index}
             <input
               bind:this={editInput}
               class="value-edit mono"
@@ -91,8 +104,9 @@
           {:else}
             <button
               class="value mono"
-              onclick={() => startEdit(reg)}
-              title={$t("machine.ioEdit")}
+              onclick={() => startEdit(reg, index)}
+              disabled={readOnlyRows[index]}
+              title={readOnlyRows[index] ? reg.name : $t("machine.ioEdit")}
             >
               {fmtByte(reg.value)}
             </button>

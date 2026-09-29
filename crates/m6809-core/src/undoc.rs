@@ -178,13 +178,11 @@ impl Cpu {
     }
 
     pub(crate) fn exec_freerun_step(&mut self) -> StepCtx {
-        StepCtx {
-            cycles: 1,
-            bytes: vec![],
-            mnemonic: "HCF".into(),
-            operands: String::new(),
-            trap: None,
-        }
+        let mut ctx = StepCtx::new(0);
+        ctx.bytes.clear();
+        ctx.cycles = 1;
+        ctx.mnemonic = "HCF".into();
+        ctx
     }
 
     pub(crate) fn exec_x18(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {

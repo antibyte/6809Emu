@@ -15,8 +15,8 @@ pub fn sub8(a: u8, b: u8, borrow: bool, flags: &mut Flags) {
     let r = a as u16 + 0x100 - b as u16 - c;
     let result = r as u8;
     // Motorola/MAME: C=1 when a borrow is required (unsigned a < b + borrow-in).
+    // H is undefined after SUB/SBC/CMP; MAME and XRoar leave it unchanged.
     flags.set(Flags::C, (a as u16) < (b as u16) + c);
-    flags.set(Flags::H, (a ^ b ^ result) & 0x10 != 0);
     flags.set(Flags::V, ((a ^ b) & (a ^ result) & 0x80) != 0);
     flags.set_nz8(result);
 }

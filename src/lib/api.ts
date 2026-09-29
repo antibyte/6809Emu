@@ -9,6 +9,8 @@ import type {
   AciaTerminalState,
   AyConfig,
   AyState,
+  SpeechConfig,
+  SpeechState,
   MachineInfo,
   MachineKind,
   MachineState,
@@ -22,8 +24,9 @@ import type {
 export type { TickPayload };
 
 export interface RunSpeedConfig {
-  steps_per_tick: number;
+  rate: number;
   frame_ms: number;
+  max_steps: number;
 }
 
 export async function resetEmulator(): Promise<CpuState> {
@@ -64,17 +67,24 @@ export async function disassembleRange(
   return invoke("disassemble_range", { address, length });
 }
 
+export interface AssembleResult {
+  origin: number;
+  bytes: number[];
+  errors: { line: number; message: string }[];
+  /** 1-based source line → address (snake_case matches Rust serde IPC). */
+  line_map: Record<number, number>;
+}
+
 export async function assembleSource(
   source: string,
   origin: number,
   writeToMemory: boolean
-) {
-  return invoke<{
-    origin: number;
-    bytes: number[];
-    errors: { line: number; message: string }[];
-    lineMap: Record<number, number>;
-  }>("assemble_source", { source, origin, writeToMemory });
+): Promise<AssembleResult> {
+  return invoke<AssembleResult>("assemble_source", {
+    source,
+    origin,
+    writeToMemory,
+  });
 }
 
 export async function setBreakpoint(address: number) {
@@ -343,8 +353,9 @@ export async function setMachineProfile(kind: MachineKind): Promise<SetMachineRe
   return invoke("set_machine_profile", { dto: { kind } });
 }
 
-export async function machineKeyEvent(code: string, down: boolean): Promise<void> {
-  return invoke("machine_key_event", { code, down });
+/** Host key event: `code` = KeyboardEvent.code, `key` = KeyboardEvent.key (typed character). */
+export async function machineKeyEvent(code: string, down: boolean, key?: string): Promise<void> {
+  return invoke("machine_key_event", { code, down, key: key ?? null });
 }
 
 export async function machineKeysClear(): Promise<void> {
@@ -400,9 +411,33 @@ export async function setAyPortInput(
   return invoke("set_ay_port_input_cmd", { dto: { port, value } });
 }
 
+// ---- SP0256 / CTS256 speech ----
+
+export async function getSpeechConfig(): Promise<SpeechConfig> {
+  return invoke("get_speech_config_cmd");
+}
+
+export async function setSpeechConfig(config: SpeechConfig): Promise<MachineState> {
+  return invoke("set_speech_config_cmd", { config });
+}
+
+export async function getSpeechState(): Promise<SpeechState | null> {
+  return invoke("get_speech_state_cmd");
+}
+
+/** Speak text via CTS256. Returns base64 audio when the emulator is paused. */
+export async function speechSay(text: string): Promise<string | null> {
+  return invoke("speech_say_cmd", { dto: { text } });
+}
+
+/** CTS256A "O.K." greeting after reset on/off. */
+export async function setSpeechGreeting(on: boolean): Promise<SpeechState | null> {
+  return invoke("set_speech_greeting_cmd", { on });
+}
+
 export const RUN_SPEED_PRESETS: { label: string; config: RunSpeedConfig }[] = [
-  { label: "1×", config: { steps_per_tick: 500, frame_ms: 50 } },
-  { label: "2×", config: { steps_per_tick: 1000, frame_ms: 50 } },
-  { label: "5×", config: { steps_per_tick: 2500, frame_ms: 50 } },
-  { label: "Max", config: { steps_per_tick: 10000, frame_ms: 16 } },
+  { label: "1×", config: { rate: 1.0, frame_ms: 50, max_steps: 250_000 } },
+  { label: "2×", config: { rate: 2.0, frame_ms: 50, max_steps: 500_000 } },
+  { label: "5×", config: { rate: 5.0, frame_ms: 50, max_steps: 500_000 } },
+  { label: "Max", config: { rate: 50.0, frame_ms: 16, max_steps: 1_000_000 } },
 ];

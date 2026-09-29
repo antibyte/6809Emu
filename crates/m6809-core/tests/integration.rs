@@ -435,11 +435,11 @@ fn lda_immediate_takes_2_cycles() {
 }
 
 #[test]
-fn branch_taken_3_not_taken_2() {
+fn short_branch_not_taken_takes_3_cycles() {
     let mut emu = emu_with_program(&[
         0x27, 0x02,       // BEQ +2 (not taken, Z clear)
         0x12,             // NOP
     ]);
-    emu.step(); // BEQ not taken
-    assert_eq!(emu.cpu.total_cycles, 2);
+    emu.step(); // BEQ not taken: 8-bit branches are 3 cycles either way
+    assert_eq!(emu.cpu.total_cycles, 3);
 }

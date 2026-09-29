@@ -14,6 +14,8 @@
   import IoPanel from "./lib/components/IoPanel.svelte";
   import PiaPanel from "./lib/components/PiaPanel.svelte";
   import AyPanel from "./lib/components/AyPanel.svelte";
+  import SpeechPanel from "./lib/components/SpeechPanel.svelte";
+  import PeripheralsPanel from "./lib/components/PeripheralsPanel.svelte";
   import VideoModal from "./lib/components/VideoModal.svelte";
   import VideoPanel from "./lib/components/VideoPanel.svelte";
   import TerminalPanel from "./lib/components/TerminalPanel.svelte";
@@ -21,10 +23,18 @@
   import AppHeader from "./lib/components/AppHeader.svelte";
   import StatusBar from "./lib/components/StatusBar.svelte";
   import ShortcutsOverlay from "./lib/components/ShortcutsOverlay.svelte";
+  import UpdateDialog from "./lib/components/UpdateDialog.svelte";
   import { t, locale, toggleLocale } from "./lib/i18n";
   import { theme, cycleTheme } from "./lib/theme";
   import { showToast } from "./lib/toast";
   import { registerShortcuts } from "./lib/shortcuts";
+  import {
+    checkForUpdates,
+    downloadAndInstall,
+    getAppVersion,
+    skipVersion,
+    type UpdateOffer,
+  } from "./lib/updater";
   import {
     layout,
     togglePanel,
@@ -37,7 +47,7 @@
     type PanelId,
     type SidebarSection,
   } from "./lib/layout";
-  import type { AciaConfig, AciaTerminalState, AyConfig, AyState, CpuState, CpuVariant, DisasmLine, MachineInfo, MachineKind, MachineState, PiaConfig, PiaState, TraceEntry, VideoFrame } from "./lib/types";
+  import type { AciaConfig, AciaTerminalState, AyConfig, AyState, CpuState, CpuVariant, DisasmLine, MachineInfo, MachineKind, MachineState, PiaConfig, PiaState, SpeechConfig, SpeechState, TraceEntry, VideoFrame } from "./lib/types";
   import * as api from "./lib/api";
 
   let cpu = $state<CpuState | null>(null);
@@ -120,6 +130,12 @@ start   LDA  #$42
   let activeBottomTab = $state("memory");
   let showShortcuts = $state(false);
   let showVideoModal = $state(false);
+  let appVersion = $state("");
+  let updateOffer = $state<UpdateOffer | null>(null);
+  let showUpdateDialog = $state(false);
+  let updateInstalling = $state(false);
+  let updateProgress = $state<number | null>(null);
+  let updateChecking = $state(false);
 
   const LAYOUT_LIMITS = {
     mainMinPx: 300,
@@ -164,9 +180,10 @@ start   LDA  #$42
   let machineState = $state<MachineState>({
     kind: "bare",
     io_registers: [],
-    acia: { enabled: false, base_addr: 0xffa0, baud: 9600, e_clock_hz: 1_000_000 },
+    acia: { enabled: false, base_addr: 0xffa0, baud: 9600, e_clock_hz: 1_000_000, motorola: false },
     pia: null,
     ay: { enabled: false, base_addr: 0xff40, chip_clock_hz: 1_000_000 },
+    speech: { enabled: false, base_addr: 0xff50, xtal_hz: 3_120_000, cts_enabled: true },
   });
   let aciaEnabled = $state(false);
   let videoFrame = $state<VideoFrame | null>(null);
@@ -174,6 +191,7 @@ start   LDA  #$42
   let piaState = $state<PiaState | null>(null);
   let ayState = $state<AyState | null>(null);
   let ayMuted = $state(false);
+  let speechState = $state<SpeechState | null>(null);
   let machineChanging = $state(false);
 
   // Web Audio playback state for AY-3-8910 output.
@@ -181,9 +199,34 @@ start   LDA  #$42
   let audioFilter: BiquadFilterNode | null = null;
   let nextStartTime = 0;
   /** Schedule ahead of the playhead so IPC jitter does not underrun. */
-  const AUDIO_LEAD_S = 0.12;
-  /** Allow a deeper queue before snapping (avoids choppy restarts). */
-  const AUDIO_MAX_LEAD_S = 0.5;
+  const AUDIO_LEAD_S = 0.18;
+  const AUDIO_MAX_LEAD_S = 0.45;
+
+  function decodeAyAudioB64(b64: string): Float32Array {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const out = new Float32Array(bytes.byteLength >> 2);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < out.length; i++) {
+      out[i] = view.getFloat32(i * 4, true);
+    }
+    return out;
+  }
+
+  function resetAyPlayback() {
+    nextStartTime = 0;
+    // Drop already-scheduled AY buffers so they cannot overlap a new
+    // speech utterance (that overlap is heard as broadband hiss).
+    if (audioCtx && audioFilter) {
+      audioFilter.disconnect();
+      audioFilter = audioCtx.createBiquadFilter();
+      audioFilter.type = "lowpass";
+      audioFilter.frequency.value = 12_000;
+      audioFilter.Q.value = 0.7;
+      audioFilter.connect(audioCtx.destination);
+    }
+  }
 
   function ensureAudioCtx(): AudioContext | null {
     if (typeof window === "undefined") return null;
@@ -205,36 +248,46 @@ start   LDA  #$42
     return audioCtx;
   }
 
-  function playAyAudioChunk(samples: number[]) {
+  function playAyAudioChunk(samples: Float32Array | number[]) {
     if (ayMuted || samples.length === 0) return;
     const ctx = ensureAudioCtx();
     if (!ctx || !audioFilter) return;
     if (ctx.state === "suspended") {
       void ctx.resume();
     }
-    // Backend always renders at 44100; keep buffer rate matched so pitch is correct
-    // even when the AudioContext runs at 48000 (browser resamples).
     const rate = 44100;
-    const buf = ctx.createBuffer(1, samples.length, rate);
-    const channel = buf.getChannelData(0);
-    for (let i = 0; i < samples.length; i++) {
-      const s = samples[i];
-      channel[i] = Number.isFinite(s) ? s : 0;
+    let pcm: Float32Array;
+    if (samples instanceof Float32Array) {
+      pcm = samples;
+    } else {
+      pcm = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        const s = samples[i];
+        pcm[i] = Number.isFinite(s) ? s : 0;
+      }
     }
+    const now = ctx.currentTime;
+    let start = nextStartTime;
+    if (start <= 0) {
+      start = now + AUDIO_LEAD_S;
+    } else if (start < now) {
+      // Underrun: rebuild the lead instead of scheduling at "now" (which would
+      // leave a gap before every following chunk and crackle continuously).
+      start = now + AUDIO_LEAD_S;
+    } else if (start - now > AUDIO_MAX_LEAD_S && pcm.length > 1) {
+      const skip = Math.min(
+        pcm.length - 1,
+        Math.floor((start - now - AUDIO_LEAD_S) * rate)
+      );
+      if (skip > 0) pcm = pcm.subarray(skip);
+    }
+    const buf = ctx.createBuffer(1, pcm.length, rate);
+    buf.getChannelData(0).set(pcm);
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(audioFilter);
-    const now = ctx.currentTime;
-    let start = nextStartTime;
-    if (start < now + 0.02) {
-      // Underrun / first chunk: rebuild lead without hard cut at "now".
-      start = now + AUDIO_LEAD_S;
-    } else if (start - now > AUDIO_MAX_LEAD_S) {
-      // Queue too deep (e.g. after pause): trim latency, keep continuity.
-      start = now + AUDIO_LEAD_S;
-    }
     src.start(start);
-    nextStartTime = start + samples.length / rate;
+    nextStartTime = start + pcm.length / rate;
   }
 
   // ---- Derived panel visibility / stacks ----
@@ -253,6 +306,14 @@ start   LDA  #$42
       items.push({ id: "pia", share: $layout.sizes.sidebarRows.pia, collapsed: $layout.collapsed.pia });
     if ($layout.visible.ay && ayEnabled)
       items.push({ id: "ay", share: $layout.sizes.sidebarRows.ay, collapsed: $layout.collapsed.ay });
+    if ($layout.visible.speech && speechEnabled)
+      items.push({ id: "speech", share: $layout.sizes.sidebarRows.speech, collapsed: $layout.collapsed.speech });
+    if ($layout.visible.peripherals && hasVideo)
+      items.push({
+        id: "peripherals",
+        share: $layout.sizes.sidebarRows.peripherals,
+        collapsed: $layout.collapsed.peripherals,
+      });
     return items;
   });
   let sidebarVisible = $derived(sidebarItems.length > 0);
@@ -266,8 +327,9 @@ start   LDA  #$42
   });
   let bottomVisible = $derived(bottomItems.length > 0);
 
+  let hasVideo = $derived(machineState.kind === "coco2" || machineState.kind === "dragon32");
   let videoDockedVisible = $derived(
-    $layout.visible.video && $layout.videoDocked && machineState.kind !== "bare"
+    $layout.visible.video && $layout.videoDocked && hasVideo
   );
 
   let disasmVisible = $derived($layout.visible.disasm);
@@ -283,6 +345,8 @@ start   LDA  #$42
       { id: "io", label: $t("machine.ioTitle"), show: $layout.visible.io },
       { id: "pia", label: $t("pia.title"), show: $layout.visible.pia && piaState !== null },
       { id: "ay", label: $t("ay.title"), show: $layout.visible.ay && ayState !== null },
+      { id: "speech", label: $t("speech.title"), show: $layout.visible.speech && speechState !== null },
+      { id: "peripherals", label: $t("peripherals.title"), show: $layout.visible.peripherals && hasVideo },
     ].filter((x) => x.show)
   );
 
@@ -364,6 +428,11 @@ start   LDA  #$42
     } else {
       ayState = null;
     }
+    if (machineState.speech?.enabled) {
+      await refreshSpeechState();
+    } else {
+      speechState = null;
+    }
   }
 
   async function handleAciaConfigChange(patch: Partial<AciaConfig>) {
@@ -383,17 +452,28 @@ start   LDA  #$42
     }
   }
 
+  let aciaSendChain = Promise.resolve();
+
   async function handleAciaSend(text: string) {
+    const payload = text.replace(/\n/g, "\r");
+    if (!payload) return;
+    aciaSendChain = aciaSendChain.then(() => flushAciaSend(payload)).catch(() => {});
+    await aciaSendChain;
+  }
+
+  async function flushAciaSend(payload: string) {
+    const steps = machineState.kind === "ms_basic"
+      ? (payload.includes("\r") ? 400_000 : 80_000)
+      : 20_000;
     if (running) {
-      await api.aciaSendInput(text);
-      aciaTerminal = await api.getAciaTerminal();
+      await api.aciaSendInput(payload);
       return;
     }
     try {
-      aciaTerminal = await api.aciaSendAndRun(text, 50000);
+      aciaTerminal = await api.aciaSendAndRun(payload, steps);
       cpu = await api.getCpuState();
     } catch {
-      await api.aciaSendInput(text);
+      await api.aciaSendInput(payload);
       aciaTerminal = await api.getAciaTerminal();
     }
   }
@@ -453,8 +533,8 @@ start   LDA  #$42
       setPanel("ay", true);
     } else {
       ayState = null;
-      // Suspend audio context when chip is disabled.
-      if (audioCtx && audioCtx.state !== "suspended") {
+      resetAyPlayback();
+      if (!speechEnabled && audioCtx && audioCtx.state !== "suspended") {
         void audioCtx.suspend();
       }
       if (compactLayout && activeMainTab === "ay") {
@@ -477,6 +557,61 @@ start   LDA  #$42
     }
   }
 
+  let speechEnabled = $derived(machineState.speech?.enabled ?? false);
+
+  async function refreshSpeechState() {
+    speechState = await api.getSpeechState();
+  }
+
+  async function handleSpeechConfigChange(patch: Partial<SpeechConfig>) {
+    const base: SpeechConfig = machineState.speech ?? {
+      enabled: false,
+      base_addr: 0xFF50,
+      xtal_hz: 3_120_000,
+      cts_enabled: true,
+    };
+    const next: SpeechConfig = { ...base, ...patch };
+    const dto = await api.setSpeechConfig(next);
+    machineState = dto;
+    if (next.enabled) {
+      resetAyPlayback();
+      await refreshSpeechState();
+      setPanel("speech", true);
+    } else {
+      speechState = null;
+      if (!ayEnabled && audioCtx && audioCtx.state !== "suspended") {
+        void audioCtx.suspend();
+      }
+      if (compactLayout && activeMainTab === "speech") {
+        activeMainTab = "disasm";
+      }
+    }
+  }
+
+  async function maybeRefreshSpeechOnTick() {
+    if (!speechEnabled) return;
+    speechState = await api.getSpeechState();
+  }
+
+  async function handleSpeechSay(text: string) {
+    const b64 = await api.speechSay(text);
+    await refreshSpeechState();
+    if (b64) {
+      resetAyPlayback();
+      playAyAudioChunk(decodeAyAudioB64(b64));
+    }
+  }
+
+  async function handleSpeechGreeting(on: boolean) {
+    speechState = await api.setSpeechGreeting(on);
+  }
+
+  /** Cartridge insert/eject cold-starts the machine in the backend. */
+  async function handlePeripheralReset() {
+    running = false;
+    await refresh();
+  }
+
   async function refresh() {
     cpu = await api.getCpuState();
     await refreshDisasm();
@@ -486,6 +621,7 @@ start   LDA  #$42
     await refreshMachineState();
     await refreshPiaState();
     await refreshAyState();
+    await refreshSpeechState();
   }
 
   async function refreshDisasm() {
@@ -506,22 +642,18 @@ start   LDA  #$42
     if (payload.step.trap || payload.cpu.halted) {
       running = false;
     }
+    if (payload.acia) {
+      aciaTerminal = payload.acia;
+    }
+    if (payload.video !== undefined) {
+      videoFrame = payload.video;
+    }
     trace = [
       ...trace.slice(-(traceMaxDisplay - 1)),
       { ...payload.step, id: ++traceId },
     ];
     // Audio is scheduled immediately in the event listener — never coalesce
     // it through rAF (dropped chunks = choppy tone).
-  }
-
-  async function maybeRefreshVideoOnTick() {
-    if (machineState.kind === "bare") return;
-    videoFrame = await api.getVideoFrame();
-  }
-
-  async function maybeRefreshTerminalOnTick() {
-    if (!aciaEnabled) return;
-    aciaTerminal = await api.getAciaTerminal();
   }
 
   function trapLabel(trap: string | null): string | null {
@@ -532,6 +664,7 @@ start   LDA  #$42
       Halted: "status.trapHalted",
       IllegalOpcode: "status.trapIllegal",
       Swi: "status.trapSwi",
+      DivideByZero: "status.trapDivZero",
     };
     const key = map[trap];
     return key ? translate(key) : trap;
@@ -665,7 +798,9 @@ start   LDA  #$42
       if (result.errors.length === 0) {
         loadAddr = result.origin;
         appliedLoadAddr = result.origin;
-        sourceLineMap = new Map(Object.entries(result.lineMap).map(([l, a]) => [Number(l), a]));
+        sourceLineMap = new Map(
+          Object.entries(result.line_map ?? {}).map(([l, a]) => [Number(l), a])
+        );
         if (aciaEnabled) {
           await api.resetEmulator();
           cpu = await api.getCpuState();
@@ -732,6 +867,7 @@ start   LDA  #$42
       base_addr: 0xffa0,
       baud: 1_000_000,
       e_clock_hz: 1_000_000,
+      motorola: false,
     });
     machineState = { ...dto, acia: { ...dto.acia } };
     aciaEnabled = true;
@@ -759,6 +895,25 @@ start   LDA  #$42
     setPanel("ay", true);
   }
 
+  async function setupSpeechDemo() {
+    if (machineState.kind !== "bare") {
+      await handleMachineChange("bare");
+    }
+    // aymusic leaves the AY noise channel running; keep it off for speech.
+    if (machineState.ay?.enabled) {
+      await handleAyConfigChange({ enabled: false });
+    }
+    const dto = await api.setSpeechConfig({
+      enabled: true,
+      base_addr: 0xFF50,
+      xtal_hz: 3_120_000,
+      cts_enabled: true,
+    });
+    machineState = dto;
+    speechState = await api.getSpeechState();
+    setPanel("speech", true);
+  }
+
   async function handleLoadExample(source: string, exampleId?: string) {
     asmSource = source;
     const needsAcia = exampleId === "aciaecho";
@@ -769,7 +924,8 @@ start   LDA  #$42
     const needsHd6309 = exampleId === "hd6309";
     const needsPia = exampleId === "pia";
     const needsAy = exampleId === "aymusic";
-    if (!needsAcia && !needsCoco && !needsHd6309 && !needsPia && !needsAy) return;
+    const needsSpeech = exampleId === "speechhello";
+    if (!needsAcia && !needsCoco && !needsHd6309 && !needsPia && !needsAy && !needsSpeech) return;
 
     await withBusy(async () => {
       try {
@@ -788,6 +944,9 @@ start   LDA  #$42
         if (needsAy) {
           await setupAyDemo();
         }
+        if (needsSpeech) {
+          await setupSpeechDemo();
+        }
 
         const result = await api.assembleSource(asmSource, loadAddr, true);
         asmErrors = result.errors;
@@ -797,7 +956,9 @@ start   LDA  #$42
         }
         loadAddr = result.origin;
         appliedLoadAddr = result.origin;
-        sourceLineMap = new Map(Object.entries(result.lineMap).map(([l, a]) => [Number(l), a]));
+        sourceLineMap = new Map(
+          Object.entries(result.line_map ?? {}).map(([l, a]) => [Number(l), a])
+        );
 
         if (needsAcia) {
           await api.resetEmulator();
@@ -930,7 +1091,9 @@ start   LDA  #$42
           asmSource = result.asm_source;
           const asm = await api.assembleSource(result.asm_source, loadAddr, false);
           if (asm.errors.length === 0) {
-            sourceLineMap = new Map(Object.entries(asm.lineMap).map(([l, a]) => [Number(l), a]));
+            sourceLineMap = new Map(
+              Object.entries(asm.line_map ?? {}).map(([l, a]) => [Number(l), a])
+            );
           } else {
             sourceLineMap = new Map();
           }
@@ -1052,15 +1215,6 @@ start   LDA  #$42
     });
   }
 
-  async function handleMachineKey(code: string, down: boolean) {
-    if (machineState.kind === "bare") return;
-    try {
-      await api.machineKeyEvent(code, down);
-    } catch {
-      /* ignore key routing errors while paused/busy */
-    }
-  }
-
   async function handleMachineChange(kind: MachineKind) {
     if (machineChanging || machineState.kind === kind) return;
     machineChanging = true;
@@ -1076,9 +1230,12 @@ start   LDA  #$42
         appliedResetPc = resetPc;
         machineState = result.machine;
         aciaEnabled = machineState.acia.enabled;
-        if (kind === "bare") {
+        if (kind === "bare" || kind === "ms_basic") {
           showVideoModal = false;
           setPanel("video", false);
+        }
+        if (kind === "ms_basic") {
+          setPanel("terminal", true);
         }
 
         breakpoints = new Set();
@@ -1099,7 +1256,7 @@ start   LDA  #$42
   // ---- Layout actions ----
 
   function handleToggleVideo() {
-    if (machineState.kind === "bare") {
+    if (machineState.kind !== "coco2" && machineState.kind !== "dragon32") {
       showToast(translate("machine.videoEmpty"), "info");
       return;
     }
@@ -1112,6 +1269,56 @@ start   LDA  #$42
 
   function handleVideoDockClose() {
     setPanel("video", false);
+  }
+
+  async function handleCheckUpdates(silent = false) {
+    if (updateChecking || updateInstalling) return;
+    updateChecking = true;
+    if (!silent) {
+      showToast(translate("update.checking"), "info", 2500);
+    }
+    try {
+      const offer = await checkForUpdates({ silent });
+      if (offer) {
+        updateOffer = offer;
+        showUpdateDialog = true;
+      } else if (!silent) {
+        const ver = appVersion || (await getAppVersion());
+        showToast(translate("update.upToDate").replace("{version}", ver), "success");
+      }
+    } catch (e) {
+      console.error("Update check failed:", e);
+      if (!silent) {
+        showToast(translate("update.error"), "error");
+      }
+    } finally {
+      updateChecking = false;
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!updateOffer || updateInstalling) return;
+    updateInstalling = true;
+    updateProgress = null;
+    try {
+      await downloadAndInstall(updateOffer.update, (pct) => {
+        updateProgress = pct;
+      });
+    } catch (e) {
+      console.error("Update install failed:", e);
+      showToast(translate("update.installError"), "error");
+      updateInstalling = false;
+      updateProgress = null;
+    }
+  }
+
+  function handleUpdateLater() {
+    showUpdateDialog = false;
+  }
+
+  function handleUpdateSkip() {
+    if (updateOffer) skipVersion(updateOffer.version);
+    showUpdateDialog = false;
   }
 
   function handleResetLayout() {
@@ -1297,7 +1504,13 @@ start   LDA  #$42
 
   const cpuLabel = $derived(cpu?.variant === "hd6309" ? $t("cpu.hd6309") : $t("cpu.mc6809"));
   const machineLabel = $derived(
-    machineState.kind === "coco2" ? $t("machine.coco2") : machineState.kind === "dragon32" ? $t("machine.dragon32") : $t("machine.bare"),
+    machineState.kind === "coco2"
+      ? $t("machine.coco2")
+      : machineState.kind === "dragon32"
+        ? $t("machine.dragon32")
+        : machineState.kind === "ms_basic"
+          ? $t("machine.msBasic")
+          : $t("machine.bare"),
   );
   const trapText = $derived(!running && lastTrap ? trapLabel(lastTrap) : null);
 
@@ -1318,6 +1531,7 @@ start   LDA  #$42
 
     (async () => {
       try {
+        appVersion = await getAppVersion();
         machineProfiles = await api.listMachineProfiles();
         const boot = await api.setMachineProfile("bare");
         cpu = boot.cpu;
@@ -1341,7 +1555,9 @@ start   LDA  #$42
       unlistenTick = await api.onEmulatorTick((payload) => {
         // Schedule audio on every event — must not go through rAF coalescing,
         // otherwise intermediate chunks are dropped and the tone stutters.
-        if (payload.ay_audio && payload.ay_audio.length > 0) {
+        if (payload.ay_audio_b64) {
+          playAyAudioChunk(decodeAyAudioB64(payload.ay_audio_b64));
+        } else if (payload.ay_audio && payload.ay_audio.length > 0) {
           playAyAudioChunk(payload.ay_audio);
         }
         pendingTick = payload;
@@ -1354,10 +1570,9 @@ start   LDA  #$42
               pendingTick = null;
               void maybeRefreshDisasmOnTick(tick.cpu.pc);
               void maybeFollowMemory(tick.cpu.pc);
-              void maybeRefreshVideoOnTick();
-              void maybeRefreshTerminalOnTick();
               void maybeRefreshPiaOnTick();
               void maybeRefreshAyOnTick();
+              void maybeRefreshSpeechOnTick();
             }
           });
         }
@@ -1365,9 +1580,14 @@ start   LDA  #$42
 
       unlistenStopped = await api.onEmulatorStopped(() => {
         running = false;
+        resetAyPlayback();
         void refresh();
       });
     })().catch(() => {});
+
+    const updateTimer = window.setTimeout(() => {
+      void handleCheckUpdates(true);
+    }, 2000);
 
     const unregisterShortcuts = registerShortcuts([
       { key: "F5", handler: () => { if (busy) return; void handleRun(); } },
@@ -1383,6 +1603,7 @@ start   LDA  #$42
     ]);
 
     return () => {
+      window.clearTimeout(updateTimer);
       cancelAnimationFrame(tickRaf);
       tickRaf = 0;
       stopResize();
@@ -1434,13 +1655,20 @@ start   LDA  #$42
     onAciaBaseChange={(v) => void handleAciaConfigChange({ base_addr: v })}
     aciaBaud={machineState.acia.baud}
     onAciaBaudChange={(v) => void handleAciaConfigChange({ baud: v })}
+    aciaMotorola={machineState.acia.motorola ?? false}
+    onAciaMotorolaChange={(v) => void handleAciaConfigChange({ motorola: v })}
+    aciaStrictRx={machineState.acia.strict_rx ?? false}
+    onAciaStrictRxChange={(v) => void handleAciaConfigChange({ strict_rx: v })}
     onCycleTheme={cycleTheme}
     onToggleLocale={toggleLocale}
-    videoAvailable={machineState.kind !== "bare"}
+    videoAvailable={hasVideo}
     videoActive={$layout.visible.video}
     onToggleVideo={handleToggleVideo}
     onOpenShortcuts={() => (showShortcuts = true)}
     onResetLayout={handleResetLayout}
+    onCheckUpdates={() => void handleCheckUpdates(false)}
+    {appVersion}
+    updateAvailable={updateOffer != null}
     piaEnabled={piaEnabled}
     onPiaToggle={(enabled) => void handlePiaConfigChange({ enabled })}
     piaBase={machineState.pia?.base_addr ?? 0xFF10}
@@ -1451,6 +1679,10 @@ start   LDA  #$42
     onAyBaseChange={(v) => void handleAyConfigChange({ base_addr: v })}
     ayChipClock={machineState.ay?.chip_clock_hz ?? 1_000_000}
     onAyChipClockChange={(v) => void handleAyConfigChange({ chip_clock_hz: v })}
+    speechEnabled={speechEnabled}
+    onSpeechToggle={(enabled) => void handleSpeechConfigChange({ enabled })}
+    speechBase={machineState.speech?.base_addr ?? 0xFF50}
+    onSpeechBaseChange={(v) => void handleSpeechConfigChange({ base_addr: v })}
   />
 
   <div
@@ -1539,6 +1771,20 @@ start   LDA  #$42
                   onToggleMute={handleAyToggleMute}
                   onClose={() => handlePanelClose("ay")}
                 />
+              {:else if item.id === "speech"}
+                <SpeechPanel
+                  speech={speechState}
+                  muted={ayMuted}
+                  onToggleMute={handleAyToggleMute}
+                  onSay={handleSpeechSay}
+                  onGreetingChange={handleSpeechGreeting}
+                  onClose={() => handlePanelClose("speech")}
+                />
+              {:else if item.id === "peripherals"}
+                <PeripheralsPanel
+                  onMachineReset={handlePeripheralReset}
+                  onClose={() => handlePanelClose("peripherals")}
+                />
               {/if}
             </section>
           {/each}
@@ -1616,12 +1862,11 @@ start   LDA  #$42
         <section class="video-dock">
           <VideoPanel
             frame={videoFrame}
-            keyboardEnabled={machineState.kind !== "bare"}
+            keyboardEnabled={hasVideo}
             firmwareLabel={machineState.firmware?.name ?? ""}
             onGoto={handleMemoryGoto}
             onFullscreen={handleVideoFullscreen}
             onClose={handleVideoDockClose}
-            onKey={handleMachineKey}
           />
         </section>
       {/if}
@@ -1657,6 +1902,24 @@ start   LDA  #$42
             onClose={() => handlePanelClose("ay")}
           />
         </section>
+        <section class="compact-panel" class:tab-hidden={activeMainTab !== "speech"}>
+          <SpeechPanel
+            speech={speechState}
+            muted={ayMuted}
+            onToggleMute={handleAyToggleMute}
+            onSay={handleSpeechSay}
+            onGreetingChange={handleSpeechGreeting}
+            onClose={() => handlePanelClose("speech")}
+          />
+        </section>
+        {#if hasVideo}
+          <section class="compact-panel" class:tab-hidden={activeMainTab !== "peripherals"}>
+            <PeripheralsPanel
+              onMachineReset={handlePeripheralReset}
+              onClose={() => handlePanelClose("peripherals")}
+            />
+          </section>
+        {/if}
       {/if}
     </main>
 
@@ -1718,6 +1981,7 @@ start   LDA  #$42
                 <TerminalPanel
                   terminal={aciaTerminal}
                   baseAddr={machineState.acia.base_addr}
+                  capsLockDefault={machineState.kind === "ms_basic"}
                   onSend={(text) => void handleAciaSend(text)}
                   onClear={handleAciaClear}
                   onClose={() => handlePanelClose("terminal")}
@@ -1752,6 +2016,7 @@ start   LDA  #$42
                 <TerminalPanel
                   terminal={aciaTerminal}
                   baseAddr={machineState.acia.base_addr}
+                  capsLockDefault={machineState.kind === "ms_basic"}
                   onSend={(text) => void handleAciaSend(text)}
                   onClear={handleAciaClear}
                   onClose={() => handlePanelClose("terminal")}
@@ -1787,6 +2052,7 @@ start   LDA  #$42
   <StatusBar
     {running}
     halted={cpu?.halted ?? false}
+    waiting={cpu?.waiting ?? false}
     {busy}
     pc={cpu?.pc ?? 0}
     cycles={cpu?.total_cycles ?? 0}
@@ -1804,11 +2070,23 @@ start   LDA  #$42
 <VideoModal
   open={showVideoModal}
   frame={videoFrame}
+  keyboardEnabled={hasVideo}
   onClose={() => (showVideoModal = false)}
   onGoto={handleMemoryGoto}
 />
 
 <ShortcutsOverlay open={showShortcuts} onClose={() => (showShortcuts = false)} />
+
+<UpdateDialog
+  open={showUpdateDialog}
+  offer={updateOffer}
+  installing={updateInstalling}
+  progress={updateProgress}
+  onInstall={() => void handleInstallUpdate()}
+  onLater={handleUpdateLater}
+  onSkip={handleUpdateSkip}
+  onClose={handleUpdateLater}
+/>
 
 <Toast />
 

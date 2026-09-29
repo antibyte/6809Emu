@@ -37,6 +37,10 @@
     onAciaBaseChange,
     aciaBaud,
     onAciaBaudChange,
+    aciaMotorola = false,
+    onAciaMotorolaChange = () => {},
+    aciaStrictRx = false,
+    onAciaStrictRxChange = () => {},
     onCycleTheme,
     onToggleLocale,
     videoAvailable,
@@ -44,6 +48,9 @@
     onToggleVideo,
     onOpenShortcuts,
     onResetLayout,
+    onCheckUpdates,
+    appVersion = "",
+    updateAvailable = false,
     piaEnabled,
     onPiaToggle,
     piaBase,
@@ -54,6 +61,10 @@
     onAyBaseChange,
     ayChipClock,
     onAyChipClockChange,
+    speechEnabled,
+    onSpeechToggle,
+    speechBase,
+    onSpeechBaseChange,
   }: {
     running: boolean;
     busy: boolean;
@@ -84,6 +95,12 @@
     onAciaBaseChange: (v: number) => void;
     aciaBaud: number;
     onAciaBaudChange: (v: number) => void;
+    /** RS = A0 register order (status/control at base, data at base+1). */
+    aciaMotorola?: boolean;
+    onAciaMotorolaChange?: (v: boolean) => void;
+    /** Strict receive timing with real overrun instead of host flow control. */
+    aciaStrictRx?: boolean;
+    onAciaStrictRxChange?: (v: boolean) => void;
     onCycleTheme: () => void;
     onToggleLocale: () => void;
     videoAvailable: boolean;
@@ -91,6 +108,9 @@
     onToggleVideo: () => void;
     onOpenShortcuts: () => void;
     onResetLayout: () => void;
+    onCheckUpdates: () => void;
+    appVersion?: string;
+    updateAvailable?: boolean;
     piaEnabled: boolean;
     onPiaToggle: (enabled: boolean) => void;
     piaBase: number;
@@ -101,6 +121,10 @@
     onAyBaseChange: (v: number) => void;
     ayChipClock: number;
     onAyChipClockChange: (v: number) => void;
+    speechEnabled: boolean;
+    onSpeechToggle: (enabled: boolean) => void;
+    speechBase: number;
+    onSpeechBaseChange: (v: number) => void;
   } = $props();
 
   const themeLabel = $derived(
@@ -113,6 +137,8 @@
     { id: "io" as PanelId, icon: "io" as const, label: $t("machine.ioTitle") },
     { id: "pia" as PanelId, icon: "io" as const, label: $t("pia.title") },
     { id: "ay" as PanelId, icon: "io" as const, label: $t("ay.title") },
+    { id: "speech" as PanelId, icon: "io" as const, label: $t("speech.title") },
+    { id: "peripherals" as PanelId, icon: "io" as const, label: $t("peripherals.title") },
     { id: "breakpoints" as PanelId, icon: "breakpoint" as const, label: $t("breakpoints.title") },
     { id: "watchpoints" as PanelId, icon: "watch" as const, label: $t("watchpoints.title") },
     { id: "disasm" as PanelId, icon: "disasm" as const, label: $t("disasm.title") },
@@ -130,7 +156,13 @@
     };
   }
 
-  const baudOptions = [300, 1200, 2400, 4800, 9600, 19200, 38400];
+  const standardBauds = [300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200];
+  // Keep a non-standard rate chosen by a machine profile selectable.
+  const baudOptions = $derived(
+    standardBauds.includes(aciaBaud)
+      ? standardBauds
+      : [...standardBauds, aciaBaud].sort((a, b) => a - b)
+  );
 
   const chipClockPresets = [1_000_000, 1_773_400, 1_996_800, 2_000_000];
 </script>
@@ -239,6 +271,14 @@
               {/each}
             </select>
           </label>
+          <label class="field" title={$t("acia.motorolaHint")}>
+            <span class="lk">{$t("acia.motorola")}</span>
+            <input type="checkbox" checked={aciaMotorola} disabled={running} onchange={(e) => onAciaMotorolaChange((e.target as HTMLInputElement).checked)} />
+          </label>
+          <label class="field" title={$t("acia.strictRxHint")}>
+            <span class="lk">{$t("acia.strictRx")}</span>
+            <input type="checkbox" checked={aciaStrictRx} disabled={running} onchange={(e) => onAciaStrictRxChange((e.target as HTMLInputElement).checked)} />
+          </label>
         {/if}
 
         <div class="menu-sep"></div>
@@ -276,6 +316,19 @@
         {/if}
 
         <div class="menu-sep"></div>
+        <div class="menu-label">{$t("setup.speech")}</div>
+        <label class="field">
+          <span class="lk">{$t("speech.enabled")}</span>
+          <input type="checkbox" checked={speechEnabled} disabled={running} onchange={(e) => onSpeechToggle((e.target as HTMLInputElement).checked)} />
+        </label>
+        {#if speechEnabled}
+          <label class="field">
+            <span class="lk">{$t("speech.baseAddr")}</span>
+            <input class="mono" value={speechBase.toString(16).toUpperCase()} disabled={running} onchange={hexInput(onSpeechBaseChange, 0xffff)} size="6" />
+          </label>
+        {/if}
+
+        <div class="menu-sep"></div>
         <button class="menu-item primary" onclick={onApplyConfig} disabled={!configDirty}>
           <Icon name="check" size={13} /> {$t("setup.apply")}
         </button>
@@ -286,7 +339,7 @@
       <Popover label={$t("panels.toggle")} buttonLabel="" icon="view">
         <div class="menu-label">{$t("panels.toggle")}</div>
         {#each viewPanels as p}
-          {@const canShow = p.id !== "video" || videoAvailable}
+          {@const canShow = (p.id !== "video" && p.id !== "peripherals") || videoAvailable}
           <label class="menu-item check" class:disabled={!canShow}>
             <input type="checkbox" checked={$layout.visible[p.id]} disabled={!canShow} onchange={() => togglePanel(p.id)} />
             <Icon name={p.icon} size={13} />
@@ -297,6 +350,24 @@
         <button class="menu-item" onclick={onResetLayout}>
           <Icon name="reset" size={13} /> {$t("layout.reset")}
         </button>
+      </Popover>
+    </div>
+
+    <div class="menu-wrap">
+      <Popover label={$t("menu.help")} buttonLabel={$t("menu.help")} icon="list" active={updateAvailable}>
+        <button class="menu-item" onclick={onCheckUpdates} disabled={busy}>
+          <Icon name="external" size={13} /> {$t("update.check")}
+          {#if updateAvailable}
+            <span class="badge">!</span>
+          {/if}
+        </button>
+        <button class="menu-item" onclick={onOpenShortcuts}>
+          <Icon name="keyboard" size={13} /> {$t("shortcuts.open")}
+        </button>
+        {#if appVersion}
+          <div class="menu-sep"></div>
+          <div class="menu-meta mono">{$t("update.versionLabel")} {appVersion}</div>
+        {/if}
       </Popover>
     </div>
   </div>
@@ -443,6 +514,26 @@
     color: var(--text-faint);
     max-width: 22rem;
     white-space: normal;
+  }
+
+  .badge {
+    margin-left: auto;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 99px;
+    background: var(--accent);
+    color: var(--on-accent, #0a0e12);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  .menu-meta {
+    padding: 6px 10px 4px;
+    font-size: 11px;
+    color: var(--text-faint);
   }
 
   @media (max-width: 880px) {

@@ -1,82 +1,144 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { t } from "../i18n";
+  import * as api from "../api";
   import Icon from "./Icon.svelte";
   import { fmtAddr } from "../format";
   import type { VideoFrame } from "../types";
+  import {
+    FramePainter,
+    MouseJoystick,
+    fitScale,
+    isMachineKey,
+    joystickAxes,
+    keyId,
+    modeLabel,
+    mouseJoystickEnabled,
+  } from "./VideoPanel.svelte";
 
   let {
     open,
     frame,
     onClose,
     onGoto,
+    keyboardEnabled = true,
   }: {
     open: boolean;
     frame: VideoFrame | null;
     onClose: () => void;
     onGoto: (addr: number) => void;
+    /** Forward typed keys to the machine while the screen has focus (a frame implies CoCo / Dragon). */
+    keyboardEnabled?: boolean;
   } = $props();
 
-  function modeLabel(mode: string): string {
-    return mode
-      .replace(/([A-Za-z])(\d)/g, "$1 $2")
-      .replace(/(\d)x(\d)/gi, "$1×$2");
+  /** Vertical space taken by the backdrop padding, header, body padding, hint line and borders. */
+  const CHROME_H = 48 + 49 + 32 + 30 + 6;
+  /** Horizontal space taken by the backdrop padding, body padding and borders. */
+  const CHROME_W = 48 + 32 + 6;
+
+  let modalEl: HTMLDivElement | undefined = $state();
+  let screenEl: HTMLDivElement | undefined = $state();
+  let canvasEl: HTMLCanvasElement | undefined = $state();
+  let viewportW = $state(0);
+  let viewportH = $state(0);
+  let focused = $state(false);
+  let lastFocused: HTMLElement | null = null;
+
+  const painter = new FramePainter();
+  const joystick = new MouseJoystick();
+  /** Keys sent down to the machine and not yet released. */
+  const pressed = new Set<string>();
+
+  const canType = $derived(keyboardEnabled && !!frame);
+  const scale = $derived(
+    frame ? fitScale(viewportW - CHROME_W, viewportH - CHROME_H, frame.width, frame.height) : 0,
+  );
+
+  $effect(() => {
+    const canvas = canvasEl;
+    const current = frame;
+    if (open && canvas && current) painter.paint(canvas, current);
+  });
+
+  $effect(() => {
+    if (!open) return;
+    lastFocused = document.activeElement as HTMLElement | null;
+    const timer = window.setTimeout(() => (screenEl ?? modalEl)?.focus(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      releaseKeys();
+      joystick.release();
+      lastFocused?.focus?.();
+    };
+  });
+
+  function send(code: string, down: boolean, key: string) {
+    api.machineKeyEvent(code, down, key).catch(() => {
+      /* ignore key routing errors while paused/busy */
+    });
   }
 
-  const displayRows = $derived(
-    frame && frame.rows_text.length > 0
-      ? frame.rows_text
-      : frame
-        ? Array.from({ length: frame.rows }, (_, row) =>
-            frame.cells
-              .slice(row * frame.cols, (row + 1) * frame.cols)
-              .map((cell) => {
-                if (cell & 0x80) return "\u00b7";
-                if (cell === 0 || cell === 0xff) return " ";
-                const code = cell & 0x3f;
-                if (code < 0x20) return String.fromCharCode(code + 0x40);
-                return String.fromCharCode(code);
-              })
-              .join("")
-          )
-        : []
-  );
-
-  const visibleRows = $derived.by(() => {
-    if (displayRows.length === 0) return [];
-    const keepFullGrid =
-      frame?.mode === "Text32x16" ||
-      frame?.mode === "Semigraphics4" ||
-      frame?.mode === "Semigraphics6" ||
-      frame?.mode === "Unknown";
-    if (keepFullGrid) {
-      return displayRows;
+  function handleScreenKey(e: KeyboardEvent, down: boolean) {
+    if (!open || !canType) return;
+    // Escape closes the dialog (CLEAR is also on Home).
+    if (e.key === "Escape") return;
+    const id = keyId(e);
+    if (down) {
+      if (!isMachineKey(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat && pressed.has(id)) return;
+      pressed.add(id);
+      send(e.code, true, e.key);
+    } else if (pressed.delete(id)) {
+      e.preventDefault();
+      e.stopPropagation();
+      send(e.code, false, e.key);
     }
-    let end = displayRows.length;
-    while (end > 0 && displayRows[end - 1].trim() === "") {
-      end -= 1;
-    }
-    return displayRows.slice(0, Math.max(end, 1));
-  });
+  }
 
-  const displayCols = $derived(frame?.cols ?? 32);
-  const displayRowCount = $derived(
-    frame?.mode === "Text32x16" || frame?.mode === "Semigraphics4" || frame?.mode === "Semigraphics6"
-      ? (frame?.rows ?? 16)
-      : Math.max(visibleRows.length, 1)
-  );
+  function releaseKeys() {
+    const any = pressed.size > 0;
+    pressed.clear();
+    if (any) api.machineKeysClear().catch(() => {});
+  }
 
-  const screenText = $derived.by(() => {
-    const cols = displayCols;
-    const rows = displayRowCount;
-    const out: string[] = [];
-    for (let r = 0; r < rows; r++) {
-      let line = visibleRows[r] ?? "";
-      if (line.length < cols) line = line.padEnd(cols, " ");
-      else if (line.length > cols) line = line.slice(0, cols);
-      out.push(line);
+  function handleScreenBlur() {
+    focused = false;
+    releaseKeys();
+    joystick.release();
+  }
+
+  function handleVisibility() {
+    if (document.visibilityState === "hidden") {
+      releaseKeys();
+      joystick.release();
     }
-    return out.join("\n");
-  });
+  }
+
+  function toggleMouseJoystick() {
+    const on = !$mouseJoystickEnabled;
+    mouseJoystickEnabled.set(on);
+    if (!on) joystick.release();
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    if (!$mouseJoystickEnabled || !frame || !canvasEl) return;
+    const [x, y] = joystickAxes(e, canvasEl, frame);
+    joystick.move(x, y);
+  }
+
+  function handlePointerDown(e: PointerEvent) {
+    if (!$mouseJoystickEnabled || !frame || !canvasEl || e.button !== 0) return;
+    const [x, y] = joystickAxes(e, canvasEl, frame);
+    joystick.move(x, y);
+    joystick.press(true);
+    screenEl?.setPointerCapture?.(e.pointerId);
+  }
+
+  function handlePointerUp(e: PointerEvent) {
+    if (e.button === 0) joystick.release();
+  }
 
   function handleKeydown(event: KeyboardEvent) {
     if (open && event.key === "Escape") {
@@ -84,20 +146,6 @@
       onClose();
     }
   }
-
-  let modalEl: HTMLDivElement | undefined = $state();
-  let lastFocused: HTMLElement | null = null;
-
-  $effect(() => {
-    if (open) {
-      lastFocused = document.activeElement as HTMLElement | null;
-      const t = window.setTimeout(() => modalEl?.focus(), 0);
-      return () => {
-        window.clearTimeout(t);
-        lastFocused?.focus?.();
-      };
-    }
-  });
 
   function onModalKeydown(event: KeyboardEvent) {
     if (!open || !modalEl) return;
@@ -122,9 +170,15 @@
       }
     }
   }
+
+  onDestroy(() => {
+    releaseKeys();
+    joystick.dispose();
+  });
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window bind:innerWidth={viewportW} bind:innerHeight={viewportH} onkeydown={handleKeydown} />
+<svelte:document onvisibilitychange={handleVisibility} />
 
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -144,7 +198,7 @@
           <h2 id="video-modal-title">{$t("machine.videoTitle")}</h2>
           {#if frame}
             <span class="mode mono">{modeLabel(frame.mode)}</span>
-            <span class="dims mono">{displayCols}×{displayRowCount}</span>
+            <span class="dims mono">{frame.cols}×{frame.rows}</span>
           {/if}
         </div>
         <div class="actions">
@@ -156,8 +210,22 @@
             >
               {fmtAddr(frame.base_addr)}
             </button>
+            <button
+              class="icon-btn"
+              class:active={$mouseJoystickEnabled}
+              aria-pressed={$mouseJoystickEnabled}
+              onclick={toggleMouseJoystick}
+              title={$t("video.mouseJoystickHint")}
+              aria-label={$t("video.mouseJoystick")}
+            >
+              <svg class="icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="4" r="2.4" fill="currentColor" />
+                <path d="M8 6.4v4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                <path d="M2.5 11.5h11v2.5h-11z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+              </svg>
+            </button>
           {/if}
-          <button class="close-btn" onclick={onClose} aria-label={$t("machine.videoClose")}>
+          <button class="icon-btn" onclick={onClose} aria-label={$t("machine.videoClose")}>
             <Icon name="close" size={14} />
           </button>
         </div>
@@ -167,11 +235,37 @@
         {#if !frame}
           <div class="empty">{$t("machine.videoEmpty")}</div>
         {:else}
-          <pre
-            class="screen mono"
-            style:--cols={displayCols}
-            style:--rows={displayRowCount}
-          >{screenText}</pre>
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="screen-wrap"
+            class:kbd-focus={focused && canType}
+            class:joystick={$mouseJoystickEnabled}
+            bind:this={screenEl}
+            tabindex={canType ? 0 : -1}
+            role={canType ? "application" : undefined}
+            aria-label={canType ? $t("machine.kbdCapture") : undefined}
+            onfocus={() => (focused = true)}
+            onblur={handleScreenBlur}
+            onkeydown={(e) => handleScreenKey(e, true)}
+            onkeyup={(e) => handleScreenKey(e, false)}
+            onpointermove={handlePointerMove}
+            onpointerdown={handlePointerDown}
+            onpointerup={handlePointerUp}
+            onlostpointercapture={() => joystick.release()}
+          >
+            <canvas
+              class="screen"
+              bind:this={canvasEl}
+              style:width="{frame.width * scale}px"
+              style:height="{frame.height * scale}px"
+              aria-label={$t("video.screen")}
+            ></canvas>
+          </div>
+          {#if canType}
+            <div class="hint mono" class:on={focused}>{$t("video.modalKbdHint")}</div>
+          {/if}
         {/if}
       </div>
     </div>
@@ -199,7 +293,8 @@
 
   .modal {
     width: fit-content;
-    max-width: min(96vw, 900px);
+    max-width: calc(100vw - 48px);
+    max-height: calc(100vh - 48px);
     display: flex;
     flex-direction: column;
     background: var(--bg-1);
@@ -283,7 +378,7 @@
     background: var(--accent-soft);
   }
 
-  .close-btn {
+  .icon-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -295,19 +390,26 @@
     color: var(--text-dim);
   }
 
-  .close-btn:hover {
+  .icon-btn:hover {
     color: var(--text);
     border-color: var(--accent-dim);
   }
 
-  .close-btn :global(.icon) {
+  .icon-btn.active {
+    color: var(--accent);
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+  }
+
+  .icon-btn :global(.icon) {
     margin-right: 0;
   }
 
   .modal-body {
-    position: relative;
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
     padding: 16px;
     background: var(--crt-bg);
   }
@@ -319,52 +421,38 @@
     font-size: 13px;
   }
 
+  .screen-wrap {
+    display: flex;
+    border-radius: 6px;
+    outline: none;
+  }
+
+  .screen-wrap.kbd-focus {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  .screen-wrap.joystick {
+    cursor: crosshair;
+    touch-action: none;
+  }
+
   .screen {
-    --line-ratio: 1.2;
-    position: relative;
-    margin: 0;
-    box-sizing: content-box;
-    font-family: var(--font-mono), ui-monospace, "Cascadia Mono", "Consolas", monospace;
-    font-weight: 500;
-    font-variant-ligatures: none;
-    font-feature-settings: "liga" 0, "calt" 0;
-    letter-spacing: 0;
-    font-size: min(
-      22px,
-      calc((min(90vw, 720px) - 3rem) / var(--cols)),
-      calc((min(70vh, 520px) - 3rem) / var(--rows) / var(--line-ratio))
-    );
-    line-height: var(--line-ratio);
-    color: var(--crt-phosphor);
-    background: transparent;
-    text-shadow: 0 0 5px var(--crt-glow);
+    display: block;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
     border: 1px solid var(--crt-border);
     border-radius: 6px;
-    padding: 0.45em 0.55em;
-    white-space: pre;
-    width: calc(var(--cols) * 1ch);
-    max-width: calc(100vw - 4rem);
-    overflow: hidden;
+    box-shadow: 0 0 24px color-mix(in srgb, var(--crt-glow) 35%, transparent);
+    user-select: none;
   }
 
-  .modal-body::before {
-    content: "";
-    position: absolute;
-    inset: 16px;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      to bottom,
-      var(--crt-scanline) 0px,
-      var(--crt-scanline) 1px,
-      transparent 1px,
-      transparent 3px
-    );
-    mix-blend-mode: multiply;
-    border-radius: 6px;
-    z-index: 1;
+  .hint {
+    color: var(--text-faint);
+    font-size: 11px;
+    line-height: 22px;
   }
 
-  .screen {
-    z-index: 2;
+  .hint.on {
+    color: var(--accent);
   }
 </style>

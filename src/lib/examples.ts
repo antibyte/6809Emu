@@ -232,60 +232,81 @@ IRQ_H   LDD  $0204
     id: "hd6309",
     labelKey: "examples.hd6309",
     source: `; ============================================================
-; HD6309 Demo — native mode, W/Q, TFM, MULD, DIVD, ADDR
+; HD6309 Demo — native mode, TFM, MULD, DIVD, DIVQ, ADDR, AIM
 ; ============================================================
 ; Requires CPU variant = HD6309.
 ;
-; 1) LDMD #$01 enters native mode
-; 2) Fill SRC[$0600] with $10..$1F
-; 3) TFM+ copies SRC → DST[$0700]
-; 4) MULD 10*10 → Q @ $0802
-; 5) DIVD 100/2 → quot $0806, rem $0808
-; 6) LEA walk + ADDR inter-register add
+;  1) LDMD #$01 switches to native mode (MD bit 0)
+;  2) Fill $0600-$060F with $10..$1F, TFM X+,Y+ copies it to $0700
+;     $0800/$0801 = first/last copied byte ($10/$1F)
+;  3) MULD  -300 * 1000 = -300000        Q -> $0802 ($FFFB6C20)
+;  4) DIVD  -1000 / 9 = -111 rem -1      A = rem  $0806 ($FF)
+;                                        B = quot $0807 ($91)
+;  5) DIVQ  100000 / 300 = 333 rem 100   W = quot $0808 ($014D)
+;                                        D = rem  $080A ($0064)
+;  6) ADDR W,D  (D = D + W) 1000 + 234   D -> $080C ($04D2)
+;  7) AIM/OIM/EIM #imm,address on $0810  $FF -> $F0 -> $F5 -> $5A
+;  8) LDBT/STBT: bit 6 of $0810 -> bit 7 of $0811 ($80)
 
         ORG $0100
 START   LDS  #$01FF
-        LDMD #$01
+        LDMD #$01               ; native mode (IRQs also stack W)
 
+; ---- fill + block copy ----------------------------------------
         LDX  #$0600
         LDA  #$10
         LDB  #16
 FILL    STA  ,X+
-        ADDA #1
-        SUBB #1
+        INCA
+        DECB
         BNE  FILL
 
-        LDX  #$0600
-        LDY  #$0700
-        LDW  #16
-        TFM+ X+,Y+
-
+        LDX  #$0600             ; source
+        LDY  #$0700             ; destination
+        LDW  #16                ; W = byte count
+        TFM  X+,Y+              ; X/Y advance, W counts down to 0
         LDA  $0700
         STA  $0800
         LDA  $070F
         STA  $0801
 
-        LDD  #10
-        LDW  #10
-        MULD
+; ---- signed 16 x 16 multiply: Q (D:W) = D * operand ------------
+        LDD  #-300
+        MULD #1000
         STQ  $0802
 
-        LDD  #100
-        DIVD #2
+; ---- signed 16 / 8 divide: B = quotient, A = remainder ---------
+        LDD  #-1000
+        DIVD #9
         STD  $0806
+
+; ---- signed 32 / 16 divide: W = quotient, D = remainder --------
+        LDQ  #100000
+        DIVQ #300
         STW  $0808
+        STD  $080A
 
-        LDX  #$0600
-        LEAX 5,X
-        STX  $080A
-        LDY  #$0700
-        LEAY -1,Y
-        STY  $080C
-
+; ---- inter-register add: ADDR src,dst (dst = dst + src) --------
         LDD  #1000
         LDW  #234
         ADDR W,D
-        STD  $080E
+        STD  $080C
+
+; ---- logic on memory: AIM/OIM/EIM/TIM #imm,address -------------
+        LDA  #$FF
+        STA  $0810
+        AIM  #$F0,$0810         ; AND -> $F0
+        OIM  #$05,$0810         ; OR  -> $F5
+        EIM  #$AF,$0810         ; XOR -> $5A
+        TIM  #$40,$0810         ; test bit 6: Z=0, memory unchanged
+
+; ---- bit transfer (direct page): reg,srcbit,dstbit,<addr -------
+        LDA  #$08
+        TFR  A,DP               ; direct page = $08xx
+        CLRA
+        CLR  <$11
+        LDBT A,6,0,<$10         ; A.bit0 = bit 6 of $0810
+        STBT A,0,7,<$11         ; bit 7 of $0811 = A.bit0
 
         CLRW
 IDLE    BRA  IDLE
@@ -658,9 +679,9 @@ DIAMOND LDX  #$04EE
 ;   $FFA0  data
 ;   $FFA1  status / control
 ;
-; Emulator control model:
-;   write $C0..$FF  master reset
-;   CR1 ($02)       RIE (receive IRQ enable)
+; MC6850 control:
+;   write $03       master reset (CR1:CR0 = 11)
+;   $95             RIE + 8N1 + /16 (CR7=1)
 ;   status bit0     RDRF
 ;   status bit1     TDRE
 ;
@@ -669,10 +690,10 @@ DIAMOND LDX  #$04EE
 
         ORG $0100
 START   LDS  #$01FF
-        LDA  #$C0
+        LDA  #$03
         STA  $FFA1              ; master reset
-        LDA  #$42
-        STA  $FFA1              ; RIE on
+        LDA  #$95
+        STA  $FFA1              ; RIE on, 8N1, /16
         ANDCC #$EF              ; clear I
 
         LDX  #$0180
@@ -968,6 +989,48 @@ NOTETAB FCB $EE,$00, $BD,$00, $9F,$00, $77,$00
         FCB $5F,$00, $50,$00, $3C,$00, $2F,$00
 
          END
+`,
+  },
+  {
+    id: "speechhello",
+    labelKey: "examples.speechhello",
+    source: `; ============================================================
+; SP0256-AL2 Speech Demo — say "HELLO"
+; ============================================================
+; Enable the Speech chip in Setup (base $FF50), press Run.
+;
+;   $FF50  write = allophone (A1-A6), triggers ALD strobe
+;   $FF51  read  = status: bit0 LRQ_READY, bit1 SBY (standby)
+;   $FF52  write = ASCII to CTS256 (text-to-speech front end)
+;   $FF53  read  = CTS status (bit0 = busy)
+;
+; The SP0256 has a single-entry address latch: wait for
+; LRQ_READY (bit0 of $FF51) before writing the next allophone.
+;
+; Allophone codes (SP0256-AL2):
+;   HH1=27  EH=7  LL=45  OW=53   PA3=2 (pause)
+
+        ORG $0100
+START   LDS  #$01FF
+        LDX  #$0180            ; address of the allophone list
+
+LOOP    LDB  ,X+               ; next allophone
+        CMPB #$FF              ; $FF = end of list
+        BEQ  DONE
+
+WAIT    LDA  $FF51             ; read speech status
+        ANDA #$01              ; LRQ_READY?
+        BEQ  WAIT              ; busy -> keep polling
+        STB  $FF50             ; load allophone (pulses ALD)
+        BRA  LOOP
+
+DONE    BRA  DONE              ; utterance queued; chip finishes it
+
+; ---- "HELLO" allophone sequence + trailing pause ------------
+        ORG $0180
+ALLOPH  FCB  27, 7, 45, 45, 53, 2, $FF
+
+        END
 `,
   },
 ];

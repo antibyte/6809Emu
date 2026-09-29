@@ -4,18 +4,114 @@ use std::sync::Arc;
 use m6809_asm::{assemble, disassemble_with_variant, DisassembledInsn};
 use m6809_core::{CpuState, CpuVariant, EmulatorSnapshot, LoadConfig, StepResult};
 use m6809_machine::{
-    acia_send_input, apply_machine, ay_set_port_input, ay_take_samples, clear_acia_terminal,
+    acia_send_input, apply_machine, ay_drain_audio, ay_set_port_input, board_drain_audio,
+    cartridge_eject, cartridge_insert, cartridge_state, cassette_eject, cassette_insert,
+    cassette_rewind, cassette_state, cassette_take_recording, clear_acia_terminal,
+    printer_take_output, set_pia_control_line, CartridgeStateDto, CassetteStateDto,
     get_acia_config, get_acia_terminal, get_ay_config, get_ay_state, get_pia_config, get_pia_state,
-    list_machines, machine_clear_keys, machine_host_key, machine_state, machine_video_frame,
-    restore_machine_io, set_acia_config, set_ay_config, set_pia_config, set_pia_input, AciaConfig,
-    AciaTerminalDto, AyConfig, AyStateDto, MachineInfo, MachineKind, MachineStateDto, PiaConfig,
-    PiaStateDto, VideoFrameDto, AUDIO_SAMPLE_RATE,
+    get_speech_config, get_speech_state, list_machines, machine_clear_keys, machine_host_key_event,
+    machine_state, machine_video_frame, restore_machine_io, set_acia_config, set_ay_config,
+    set_pia_config, set_pia_input, set_speech_config, set_speech_greeting, speech_drain_audio,
+    speech_run_until_idle_collect, speech_say_text, AciaConfig, AciaTerminalDto, AyConfig, AyStateDto, MachineInfo, MachineKind,
+    MachineStateDto, PiaConfig, PiaStateDto, SpeechConfig, SpeechStateDto, VideoFrameDto,
 };
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle, Emitter, State};
 
-use crate::state::{AppState, RunSpeed};
+use crate::state::{AppState, RunSpeed, DEFAULT_E_CLOCK_HZ};
 use std::time::{Duration, Instant};
+
+/// Mix 44.1 kHz mono streams (AY, speech, board DAC) into one, clipping to ±1.
+fn mix_audio(streams: Vec<Vec<f32>>) -> Vec<f32> {
+    let mut streams: Vec<Vec<f32>> = streams.into_iter().filter(|s| !s.is_empty()).collect();
+    if streams.len() <= 1 {
+        return streams.pop().unwrap_or_default();
+    }
+    streams.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    let mut out = streams.remove(0);
+    for stream in &streams {
+        for (dst, s) in out.iter_mut().zip(stream.iter()) {
+            *dst += *s;
+        }
+    }
+    for s in &mut out {
+        *s = s.clamp(-1.0, 1.0);
+    }
+    out
+}
+
+/// Drain every audio source of the machine (AY, speech, board sound).
+fn drain_machine_audio(emu: &mut m6809_core::Emulator) -> Vec<f32> {
+    mix_audio(vec![
+        ay_drain_audio(emu),
+        speech_drain_audio(emu),
+        board_drain_audio(emu),
+    ])
+}
+
+fn encode_audio_f32_base64(samples: &[f32]) -> String {
+    let mut bytes = Vec::with_capacity(samples.len() * 4);
+    for &s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    B64.encode(bytes)
+}
+
+/// Release the emulator lock this often so UI/ACIA commands can interleave.
+const RUN_LOCK_BATCH_STEPS: u32 = 2_048;
+/// How far (in frames) emulation may fall behind wall time before the backlog
+/// is dropped instead of being caught up.
+const MAX_CATCHUP_FRAMES: f64 = 4.0;
+/// MS BASIC needs ~400k steps to evaluate a line; the old 50k cap starved input.
+const ACIA_CATCHUP_STEPS_CAP: u32 = 2_000_000;
+
+fn clamp_acia_catchup_steps(steps: u32) -> u32 {
+    steps.min(ACIA_CATCHUP_STEPS_CAP)
+}
+
+struct StepBatch {
+    cycles_run: u64,
+    steps: u32,
+    last: Option<StepResult>,
+    stop: bool,
+}
+
+fn step_batch(
+    emu: &mut m6809_core::Emulator,
+    mut cycles_run: u64,
+    mut steps: u32,
+    target_cycles: u64,
+    max_steps: u32,
+    batch_steps: u32,
+) -> StepBatch {
+    let mut last = None;
+    let limit = steps.saturating_add(batch_steps.max(1)).min(max_steps);
+    let mut stop = false;
+    // SYNC/CWAI waits are not a stop condition: time keeps running so the
+    // machine's devices can raise the interrupt the program waits for.
+    while cycles_run < target_cycles && steps < limit {
+        let result = emu.step();
+        cycles_run += u64::from(result.cycles);
+        steps += 1;
+        let trapped = result.trap.is_some();
+        last = Some(result);
+        if trapped {
+            stop = true;
+            break;
+        }
+    }
+    StepBatch {
+        cycles_run,
+        steps,
+        last,
+        stop,
+    }
+}
+
+async fn yield_run_loop() {
+    tokio::task::yield_now().await;
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MemoryChunk {
@@ -51,8 +147,11 @@ pub fn reset_emulator(state: State<'_, Arc<AppState>>) -> Result<CpuState, Strin
     state.running.store(false, Ordering::SeqCst);
     let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
     let reset_pc = emu.memory.config.reset_pc;
+    // Bare metal: the vector lives in RAM. On CoCo/Dragon the vectors are ROM
+    // (writes ignored), so the configured entry point is also applied directly.
     emu.memory.write16(0xFFFE, reset_pc);
     emu.reset();
+    emu.cpu.pc = reset_pc;
     state.clear_trace();
     Ok(emu.get_state())
 }
@@ -72,18 +171,20 @@ pub async fn run_emulator(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
         return Ok(());
     }
 
+    // Audio produced while paused (single steps, ACIA catch-up) is stale now.
+    if let Ok(mut emu) = state.emulator.lock() {
+        let _ = drain_machine_audio(&mut emu);
+    }
+
     let state = state.inner().clone();
     async_runtime::spawn(async move {
-        // Prime so the first chunk covers a full UI frame (builds a small lead).
-        let mut last_audio_at = Instant::now()
-            - Duration::from_millis(
-                state
-                    .run_speed
-                    .lock()
-                    .map(|s| s.frame_ms)
-                    .unwrap_or(50),
-            );
-
+        // Wall-clock pacing: emulated time follows `rate` x elapsed real time, so
+        // timer overshoot in one frame is caught up in the next (audio stays fed).
+        let mut wall_start = Instant::now();
+        let mut emulated_secs = 0.0f64;
+        let mut paced_rate = f64::NAN;
+        // Only send a video frame when its content changed (~100 KB of JSON each).
+        let mut last_video_hash: Option<String> = None;
         loop {
             if !state.running.load(Ordering::SeqCst) {
                 break;
@@ -96,56 +197,93 @@ pub async fn run_emulator(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
                 .map(|s| s.clone())
                 .unwrap_or_default();
             let frame_ms = speed.frame_ms.max(1);
+            let rate = speed.rate.max(0.01);
+            let max_steps = speed.max_steps.max(1);
+            if rate != paced_rate {
+                wall_start = frame_start;
+                emulated_secs = 0.0;
+                paced_rate = rate;
+            }
 
-            // Match audio length to real wall time since the last chunk so
-            // work+IPC overhead cannot starve the stream (that sounded "choppy").
-            let elapsed = frame_start.saturating_duration_since(last_audio_at);
-            let mut target_samples =
-                ((elapsed.as_secs_f64() * f64::from(AUDIO_SAMPLE_RATE)).round() as usize).max(1);
-            // Clamp: 5 ms .. 100 ms per emit (keeps IPC and latency bounded).
-            let min_samples = (AUDIO_SAMPLE_RATE as usize) / 200;
-            let max_samples = (AUDIO_SAMPLE_RATE as usize) / 10;
-            target_samples = target_samples.clamp(min_samples, max_samples);
+            // E clock of the machine (CoCo NTSC, Dragon PAL, MsBasic SBC, SAM speed-up).
+            let clock_hz = match state.emulator.lock() {
+                Ok(emu) => f64::from(emu.cpu_clock_hz().unwrap_or(DEFAULT_E_CLOCK_HZ)),
+                Err(_) => break,
+            };
+            let frame_secs = frame_ms as f64 / 1000.0;
+            let wall_secs = frame_start.duration_since(wall_start).as_secs_f64();
+            let target_secs = (wall_secs + frame_secs) * rate;
+            let max_lag = MAX_CATCHUP_FRAMES * frame_secs * rate;
+            if target_secs - emulated_secs > max_lag {
+                emulated_secs = target_secs - frame_secs * rate;
+            }
+            let target_cycles = ((target_secs - emulated_secs) * clock_hz).max(0.0).round() as u64;
+
+            let mut cycles_run = 0u64;
+            let mut steps = 0u32;
+            let mut last = None;
+            while cycles_run < target_cycles && steps < max_steps {
+                if !state.running.load(Ordering::SeqCst) {
+                    break;
+                }
+                let batch = {
+                    let mut emu = match state.emulator.lock() {
+                        Ok(emu) => emu,
+                        Err(_) => break,
+                    };
+                    step_batch(
+                        &mut emu,
+                        cycles_run,
+                        steps,
+                        target_cycles,
+                        max_steps,
+                        RUN_LOCK_BATCH_STEPS,
+                    )
+                };
+                cycles_run = batch.cycles_run;
+                steps = batch.steps;
+                if batch.last.is_some() {
+                    last = batch.last;
+                }
+                if batch.stop {
+                    state.running.store(false, Ordering::SeqCst);
+                    break;
+                }
+                yield_run_loop().await;
+            }
+            emulated_secs += cycles_run as f64 / clock_hz;
 
             let tick = {
                 let mut emu = match state.emulator.lock() {
                     Ok(emu) => emu,
                     Err(_) => break,
                 };
-
-                if emu.cpu.halted {
-                    state.running.store(false, Ordering::SeqCst);
-                    break;
-                }
-
-                let mut last = None;
-                for _ in 0..speed.steps_per_tick {
-                    if !state.running.load(Ordering::SeqCst) || emu.cpu.halted {
-                        break;
+                let audio = drain_machine_audio(&mut emu);
+                let acia = get_acia_terminal(&emu);
+                let video = machine_video_frame(&emu).filter(|frame| {
+                    let changed = last_video_hash.as_deref() != Some(frame.hash.as_str());
+                    if changed {
+                        last_video_hash = Some(frame.hash.clone());
                     }
-                    let result = emu.step();
-                    let stop = result.trap.is_some();
-                    last = Some(result);
-                    if stop {
-                        state.running.store(false, Ordering::SeqCst);
-                        break;
-                    }
-                }
-
-                let audio = ay_take_samples(&mut emu, target_samples);
-                last.map(|result| (result, emu.get_state(), audio))
+                    changed
+                });
+                last.map(|result| (result, emu.get_state(), audio, acia, video, steps))
             };
 
-            last_audio_at = frame_start;
-
-            if let Some((result, cpu_state, audio)) = tick {
+            if let Some((result, cpu_state, audio, acia, video, steps)) = tick {
                 state.push_trace(result.clone());
                 let mut payload = serde_json::json!({
                     "step": result,
                     "cpu": cpu_state,
+                    "steps": steps,
+                    "acia": acia,
                 });
+                // Omitted when unchanged: the UI keeps showing the previous frame.
+                if let Some(video) = video {
+                    payload["video"] = serde_json::json!(video);
+                }
                 if !audio.is_empty() {
-                    payload["ay_audio"] = serde_json::json!(audio);
+                    payload["ay_audio_b64"] = serde_json::json!(encode_audio_f32_base64(&audio));
                 }
                 let _ = app.emit("emulator-tick", payload);
             } else {
@@ -156,8 +294,6 @@ pub async fn run_emulator(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
                 break;
             }
 
-            // Sleep only the remainder of the frame budget (never sleep full
-            // frame_ms on top of work time — that was the main underrun source).
             let deadline = frame_start + Duration::from_millis(frame_ms);
             let now = Instant::now();
             if deadline > now {
@@ -189,7 +325,7 @@ pub fn get_cpu_state(state: State<'_, Arc<AppState>>) -> Result<CpuState, String
 }
 
 #[tauri::command]
-pub fn get_memory(
+pub async fn get_memory(
     address: u16,
     length: u16,
     state: State<'_, Arc<AppState>>,
@@ -198,7 +334,8 @@ pub fn get_memory(
     let len = length.min(4096);
     let mut bytes = Vec::with_capacity(len as usize);
     for i in 0..len {
-        bytes.push(emu.memory.read8(address.wrapping_add(i)));
+        // Side-effect-free: viewing I/O registers must not clear flags or eat input.
+        bytes.push(emu.memory.peek8(address.wrapping_add(i)));
     }
     Ok(MemoryChunk { address, bytes })
 }
@@ -252,7 +389,13 @@ pub fn export_binary_file(
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     let emu = state.emulator.lock().map_err(|e| e.to_string())?;
-    let data = emu.memory.export_range(address, length)?;
+    if address as usize + length as usize > 0x10000 {
+        return Err("Export range exceeds memory".into());
+    }
+    // What the CPU sees (ROM, cartridge, I/O), read without side effects.
+    let data: Vec<u8> = (0..length)
+        .map(|i| emu.memory.peek8(address.wrapping_add(i)))
+        .collect();
     std::fs::write(&path, data).map_err(|e| format!("Failed to write {path}: {e}"))?;
     Ok(())
 }
@@ -304,7 +447,7 @@ pub async fn disassemble_range(
         let len = length.min(128);
         let mut bytes = Vec::with_capacity(len as usize);
         for i in 0..len {
-            bytes.push(emu.memory.read8(address.wrapping_add(i)));
+            bytes.push(emu.memory.peek8(address.wrapping_add(i)));
         }
         (bytes, emu.get_variant())
     };
@@ -420,8 +563,9 @@ pub fn trigger_nmi(state: State<'_, Arc<AppState>>) -> Result<CpuState, String> 
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RunSpeedDto {
-    pub steps_per_tick: u32,
+    pub rate: f64,
     pub frame_ms: u64,
+    pub max_steps: u32,
 }
 
 #[tauri::command]
@@ -431,8 +575,9 @@ pub fn set_run_speed(
 ) -> Result<(), String> {
     let mut run_speed = state.run_speed.lock().map_err(|e| e.to_string())?;
     *run_speed = RunSpeed {
-        steps_per_tick: speed.steps_per_tick.max(1),
+        rate: speed.rate.max(0.01),
         frame_ms: speed.frame_ms.max(1),
+        max_steps: speed.max_steps.max(1),
     };
     Ok(())
 }
@@ -564,7 +709,7 @@ pub fn get_machine_state(state: State<'_, Arc<AppState>>) -> Result<MachineState
 }
 
 #[tauri::command]
-pub fn get_video_frame(
+pub async fn get_video_frame(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Option<VideoFrameDto>, String> {
     let emu = state.emulator.lock().map_err(|e| e.to_string())?;
@@ -589,36 +734,36 @@ pub fn set_acia_config_cmd(
 }
 
 #[tauri::command]
-pub fn get_acia_terminal_cmd(state: State<'_, Arc<AppState>>) -> Result<AciaTerminalDto, String> {
+pub async fn get_acia_terminal_cmd(
+    state: State<'_, Arc<AppState>>,
+) -> Result<AciaTerminalDto, String> {
     let emu = state.emulator.lock().map_err(|e| e.to_string())?;
     Ok(get_acia_terminal(&emu))
 }
 
 #[tauri::command]
-pub fn acia_send_input_cmd(text: String, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+pub async fn acia_send_input_cmd(
+    text: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
     let emu = state.emulator.lock().map_err(|e| e.to_string())?;
     acia_send_input(&emu, &text);
     Ok(())
 }
 
 #[tauri::command]
-pub fn acia_run_steps_cmd(
+pub async fn acia_run_steps_cmd(
     steps: u32,
     state: State<'_, Arc<AppState>>,
 ) -> Result<AciaTerminalDto, String> {
     if state.running.load(Ordering::SeqCst) {
         return Err("Cannot step while the emulator is running".into());
     }
-    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
-    let n = steps.min(50_000);
-    for _ in 0..n {
-        emu.step();
-    }
-    Ok(get_acia_terminal(&emu))
+    run_acia_catchup(state.inner(), None, steps).await
 }
 
 #[tauri::command]
-pub fn acia_send_and_run_cmd(
+pub async fn acia_send_and_run_cmd(
     text: String,
     steps: u32,
     state: State<'_, Arc<AppState>>,
@@ -626,12 +771,37 @@ pub fn acia_send_and_run_cmd(
     if state.running.load(Ordering::SeqCst) {
         return Err("Cannot process ACIA input while the emulator is running".into());
     }
-    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
-    acia_send_input(&emu, &text);
-    let n = steps.min(50_000);
-    for _ in 0..n {
-        emu.step();
+    run_acia_catchup(state.inner(), Some(text), steps).await
+}
+
+async fn run_acia_catchup(
+    state: &Arc<AppState>,
+    text: Option<String>,
+    steps: u32,
+) -> Result<AciaTerminalDto, String> {
+    let n = clamp_acia_catchup_steps(steps);
+    let mut cycles_run = 0u64;
+    let mut done = 0u32;
+    if let Some(text) = text {
+        let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+        acia_send_input(&emu, &text);
     }
+    while done < n {
+        if state.running.load(Ordering::SeqCst) {
+            break;
+        }
+        let batch = {
+            let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+            step_batch(&mut emu, cycles_run, done, u64::MAX, n, RUN_LOCK_BATCH_STEPS)
+        };
+        cycles_run = batch.cycles_run;
+        done = batch.steps;
+        if batch.stop || done == 0 {
+            break;
+        }
+        yield_run_loop().await;
+    }
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
     Ok(get_acia_terminal(&emu))
 }
 
@@ -660,7 +830,7 @@ pub fn set_pia_config_cmd(
 }
 
 #[tauri::command]
-pub fn get_pia_state_cmd(state: State<'_, Arc<AppState>>) -> Result<Option<PiaStateDto>, String> {
+pub async fn get_pia_state_cmd(state: State<'_, Arc<AppState>>) -> Result<Option<PiaStateDto>, String> {
     let emu = state.emulator.lock().map_err(|e| e.to_string())?;
     Ok(get_pia_state(&emu))
 }
@@ -702,7 +872,7 @@ pub fn set_ay_config_cmd(
 }
 
 #[tauri::command]
-pub fn get_ay_state_cmd(state: State<'_, Arc<AppState>>) -> Result<Option<AyStateDto>, String> {
+pub async fn get_ay_state_cmd(state: State<'_, Arc<AppState>>) -> Result<Option<AyStateDto>, String> {
     let emu = state.emulator.lock().map_err(|e| e.to_string())?;
     Ok(get_ay_state(&emu))
 }
@@ -722,6 +892,78 @@ pub fn set_ay_port_input_cmd(
     let port = dto.port.chars().next().unwrap_or('a');
     ay_set_port_input(&emu, port, dto.value);
     Ok(get_ay_state(&emu))
+}
+
+// ---- SP0256 / CTS256 speech commands ----
+
+/// Paused catch-up budget: ~20 s of 44.1 kHz audio covers a long sentence plus
+/// the CTS256A's "O.K." greeting after a reset.
+const SPEECH_CATCHUP_SAMPLES: usize = 900_000;
+
+#[tauri::command]
+pub fn get_speech_config_cmd(state: State<'_, Arc<AppState>>) -> Result<SpeechConfig, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(get_speech_config(&emu))
+}
+
+#[tauri::command]
+pub fn set_speech_config_cmd(
+    config: SpeechConfig,
+    state: State<'_, Arc<AppState>>,
+) -> Result<MachineStateDto, String> {
+    state.running.store(false, Ordering::SeqCst);
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    set_speech_config(&mut emu, config);
+    Ok(machine_state(&emu))
+}
+
+#[tauri::command]
+pub async fn get_speech_state_cmd(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<SpeechStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(get_speech_state(&emu))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpeechSayDto {
+    pub text: String,
+}
+
+/// Speak a text via the CTS256 front end. If the emulator is paused, run a
+/// catch-up so the utterance is fully rendered and audible, returning the mixed
+/// audio as base64 for the frontend to play immediately.
+#[tauri::command]
+pub async fn speech_say_cmd(
+    dto: SpeechSayDto,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<String>, String> {
+    let running = state.running.load(Ordering::SeqCst);
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    speech_say_text(&mut emu, &dto.text);
+    if running {
+        // The run loop will render + emit audio on its own.
+        return Ok(None);
+    }
+    // Everything that was rendered, not just what fits the 2 s playback buffer.
+    let mut audio = speech_drain_audio(&mut emu);
+    audio.extend(speech_run_until_idle_collect(&mut emu, SPEECH_CATCHUP_SAMPLES));
+    if audio.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(encode_audio_f32_base64(&audio)))
+    }
+}
+
+/// Switch the CTS256A "O.K." greeting after reset on/off.
+#[tauri::command]
+pub fn set_speech_greeting_cmd(
+    on: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<SpeechStateDto>, String> {
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    set_speech_greeting(&mut emu, on);
+    Ok(get_speech_state(&emu))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -765,13 +1007,14 @@ pub fn set_machine_profile(
 }
 
 #[tauri::command]
-pub fn machine_key_event(
+pub async fn machine_key_event(
     code: String,
     down: bool,
+    key: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
-    machine_host_key(&mut emu, &code, down);
+    machine_host_key_event(&mut emu, &code, key.as_deref(), down);
     Ok(())
 }
 
@@ -780,6 +1023,109 @@ pub fn machine_keys_clear(state: State<'_, Arc<AppState>>) -> Result<(), String>
     let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
     machine_clear_keys(&mut emu);
     Ok(())
+}
+
+// ---- CoCo / Dragon peripherals ----
+
+const NO_BOARD: &str = "This machine profile has no CoCo/Dragon peripheral port";
+
+#[tauri::command]
+pub fn machine_set_joystick(
+    port: u8,
+    x: u8,
+    y: u8,
+    button: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    m6809_machine::machine_set_joystick(&emu, usize::from(port.min(1)), x, y, button);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn machine_cassette_insert(
+    name: String,
+    data: Vec<u8>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<CassetteStateDto, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    cassette_insert(&emu, name, data).ok_or_else(|| NO_BOARD.to_string())
+}
+
+#[tauri::command]
+pub fn machine_cassette_eject(state: State<'_, Arc<AppState>>) -> Result<CassetteStateDto, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    cassette_eject(&emu).ok_or_else(|| NO_BOARD.to_string())
+}
+
+#[tauri::command]
+pub fn machine_cassette_rewind(state: State<'_, Arc<AppState>>) -> Result<CassetteStateDto, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    cassette_rewind(&emu).ok_or_else(|| NO_BOARD.to_string())
+}
+
+#[tauri::command]
+pub fn machine_cassette_state(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<CassetteStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(cassette_state(&emu))
+}
+
+#[tauri::command]
+pub fn machine_cassette_take_recording(state: State<'_, Arc<AppState>>) -> Result<Vec<u8>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(cassette_take_recording(&emu))
+}
+
+#[tauri::command]
+pub fn machine_printer_take_output(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(printer_take_output(&emu))
+}
+
+#[tauri::command]
+pub fn machine_cartridge_insert(
+    name: String,
+    data: Vec<u8>,
+    autostart: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<CartridgeStateDto, String> {
+    state.running.store(false, Ordering::SeqCst);
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    let result =
+        cartridge_insert(&mut emu, name, data, autostart).ok_or_else(|| NO_BOARD.to_string());
+    state.clear_trace();
+    result
+}
+
+#[tauri::command]
+pub fn machine_cartridge_eject(state: State<'_, Arc<AppState>>) -> Result<CartridgeStateDto, String> {
+    state.running.store(false, Ordering::SeqCst);
+    let mut emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    let result = cartridge_eject(&mut emu).ok_or_else(|| NO_BOARD.to_string());
+    state.clear_trace();
+    result
+}
+
+#[tauri::command]
+pub fn machine_cartridge_state(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<CartridgeStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    Ok(cartridge_state(&emu))
+}
+
+/// Drive a control line of the bare-metal 6821 from the UI.
+#[tauri::command]
+pub fn set_pia_control_line_cmd(
+    line: String,
+    level: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<PiaStateDto>, String> {
+    let emu = state.emulator.lock().map_err(|e| e.to_string())?;
+    set_pia_control_line(&emu, &line.to_ascii_lowercase(), level);
+    Ok(get_pia_state(&emu))
 }
 
 #[tauri::command]
@@ -803,8 +1149,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// Wire-format contract for assemble IPC: serde uses snake_case field names.
-    /// Frontend must read `line_map` (not camelCase `lineMap`) from the invoke result.
+    /// Wire-format contract: assemble IPC exposes `line_map` (snake_case), matching the UI.
     #[test]
     fn assemble_result_serializes_line_map_snake_case() {
         let mut line_map = HashMap::new();
@@ -822,7 +1167,7 @@ mod tests {
         );
         assert!(
             value.get("lineMap").is_none(),
-            "must not emit camelCase lineMap (frontend mismatch if UI reads lineMap)"
+            "must not emit camelCase lineMap"
         );
         assert_eq!(value["line_map"]["3"], 0x0100);
         assert_eq!(value["origin"], 0x0100);
@@ -843,5 +1188,84 @@ mod tests {
         let value = serde_json::to_value(&result).expect("serialize");
         assert_eq!(value["errors"][0]["line"], 4);
         assert_eq!(value["errors"][0]["message"], "unknown mnemonic");
+    }
+
+    #[test]
+    fn acia_catchup_budget_covers_msbasic_line() {
+        assert!(
+            clamp_acia_catchup_steps(400_000) >= 400_000,
+            "MS BASIC needs ~400k steps to evaluate a line"
+        );
+    }
+
+    #[test]
+    fn run_lock_batch_stays_ui_sized() {
+        const _: () = assert!(RUN_LOCK_BATCH_STEPS <= 4_096 && RUN_LOCK_BATCH_STEPS >= 256);
+    }
+
+    #[test]
+    fn emulator_lock_is_released_between_batches() {
+        use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+        use std::sync::Mutex;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let mut seed = m6809_core::Emulator::new();
+        // Tight BRA * loop so the slice actually burns instructions.
+        seed.memory.write8(0x0100, 0x20);
+        seed.memory.write8(0x0101, 0xFE);
+        seed.cpu.pc = 0x0100;
+
+        let emu = Arc::new(Mutex::new(seed));
+        let acquired = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(AtomicBool::new(false));
+
+        let waiter_emu = emu.clone();
+        let waiter_flag = acquired.clone();
+        let waiter_started = started.clone();
+        let waiter = thread::spawn(move || {
+            while !waiter_started.load(AtomicOrdering::SeqCst) {
+                thread::yield_now();
+            }
+            let start = Instant::now();
+            let _guard = waiter_emu.lock().expect("lock");
+            waiter_flag.store(true, AtomicOrdering::SeqCst);
+            start.elapsed()
+        });
+
+        let mut cycles_run = 0u64;
+        let mut steps = 0u32;
+        const TOTAL: u32 = 80_000;
+        while steps < TOTAL {
+            {
+                let mut guard = emu.lock().expect("lock");
+                started.store(true, AtomicOrdering::SeqCst);
+                let batch = step_batch(
+                    &mut guard,
+                    cycles_run,
+                    steps,
+                    u64::MAX,
+                    TOTAL,
+                    RUN_LOCK_BATCH_STEPS,
+                );
+                cycles_run = batch.cycles_run;
+                steps = batch.steps;
+                if batch.stop {
+                    break;
+                }
+            }
+            thread::yield_now();
+        }
+
+        let wait = waiter.join().expect("waiter");
+        assert!(
+            acquired.load(AtomicOrdering::SeqCst),
+            "UI thread never got the emulator lock"
+        );
+        assert!(
+            wait < Duration::from_millis(80),
+            "lock wait {wait:?} is too long for a UI command"
+        );
+        assert!(steps >= RUN_LOCK_BATCH_STEPS);
     }
 }

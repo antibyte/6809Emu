@@ -17,6 +17,8 @@ pub enum Trap {
     Halted,
     IllegalOpcode,
     Swi,
+    /// HD6309 DIVD/DIVQ by zero (MD bit 7, vectored through $FFF0).
+    DivideByZero,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +61,9 @@ pub struct CpuState {
     pub v: u16,
     #[serde(default)]
     pub mode_reg: u8,
+    /// SYNC or CWAI is waiting for an interrupt (time keeps running).
+    #[serde(default)]
+    pub waiting: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

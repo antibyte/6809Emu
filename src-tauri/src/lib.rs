@@ -10,6 +10,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(AppState {
             emulator: Mutex::new(m6809_core::Emulator::new()),
             running: Arc::new(AtomicBool::new(false)),
@@ -74,6 +76,22 @@ pub fn run() {
             commands::set_ay_config_cmd,
             commands::get_ay_state_cmd,
             commands::set_ay_port_input_cmd,
+            commands::get_speech_config_cmd,
+            commands::set_speech_config_cmd,
+            commands::get_speech_state_cmd,
+            commands::speech_say_cmd,
+            commands::set_speech_greeting_cmd,
+            commands::machine_set_joystick,
+            commands::machine_cassette_insert,
+            commands::machine_cassette_eject,
+            commands::machine_cassette_rewind,
+            commands::machine_cassette_state,
+            commands::machine_cassette_take_recording,
+            commands::machine_printer_take_output,
+            commands::machine_cartridge_insert,
+            commands::machine_cartridge_eject,
+            commands::machine_cartridge_state,
+            commands::set_pia_control_line_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

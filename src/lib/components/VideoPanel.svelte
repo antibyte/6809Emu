@@ -1,9 +1,189 @@
+<script module lang="ts">
+  import { writable } from "svelte/store";
+  import { setJoystick } from "../machineApi";
+  import type { VideoFrame } from "../types";
+
+  // Shared by VideoPanel and VideoModal.
+
+  const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x0a0b0c0d]).buffer)[0] === 0x0d;
+
+  /** "#rrggbb" → opaque pixel word for an ImageData Uint32 view. */
+  function pixelWord(hex: string): number {
+    const v = Number.parseInt(hex.replace("#", ""), 16) || 0;
+    const r = (v >> 16) & 0xff;
+    const g = (v >> 8) & 0xff;
+    const b = v & 0xff;
+    return LITTLE_ENDIAN
+      ? (0xff000000 | (b << 16) | (g << 8) | r) >>> 0
+      : ((r << 24) | (g << 16) | (b << 8) | 0xff) >>> 0;
+  }
+
+  /** Paints palette-indexed frames onto a canvas; unchanged frames (same hash) are skipped. */
+  export class FramePainter {
+    #canvas: HTMLCanvasElement | null = null;
+    #hash = "";
+    #image: ImageData | null = null;
+    #words: Uint32Array | null = null;
+    #paletteKey = "";
+    #lut = new Uint32Array(256);
+
+    paint(canvas: HTMLCanvasElement, frame: VideoFrame): void {
+      const { width, height } = frame;
+      if (!frame.pixels || !(width > 0) || !(height > 0)) return;
+      if (canvas === this.#canvas && frame.hash === this.#hash) return;
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      if (!ctx) return;
+      if (!this.#image || this.#image.width !== width || this.#image.height !== height) {
+        this.#image = ctx.createImageData(width, height);
+        this.#words = new Uint32Array(this.#image.data.buffer);
+      }
+      const paletteKey = frame.palette.join(",");
+      if (paletteKey !== this.#paletteKey) {
+        this.#lut.fill(pixelWord("#000000"));
+        frame.palette.slice(0, 256).forEach((colour, i) => (this.#lut[i] = pixelWord(colour)));
+        this.#paletteKey = paletteKey;
+      }
+      let indices: string;
+      try {
+        indices = atob(frame.pixels);
+      } catch {
+        return;
+      }
+      const words = this.#words!;
+      const lut = this.#lut;
+      const count = Math.min(indices.length, words.length);
+      for (let i = 0; i < count; i++) {
+        words[i] = lut[indices.charCodeAt(i)];
+      }
+      ctx.putImageData(this.#image, 0, 0);
+      this.#canvas = canvas;
+      this.#hash = frame.hash;
+    }
+  }
+
+  /** Scale that fits `w`×`h` into the available box, snapped to whole device pixels when that costs ≤ 15 %. */
+  export function fitScale(availW: number, availH: number, w: number, h: number): number {
+    if (!(availW > 0) || !(availH > 0) || !(w > 0) || !(h > 0)) return 0;
+    const fit = Math.min(availW / w, availH / h);
+    const dpr = typeof window !== "undefined" && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+    const device = fit * dpr;
+    const whole = Math.floor(device);
+    return whole >= 1 && whole / device >= 0.85 ? whole / dpr : fit;
+  }
+
+  /** Header label of a frame mode ("Text32x16" → "Text"; the size is shown next to it). */
+  export function modeLabel(mode: string): string {
+    return mode.replace(/^Text\d+x\d+$/, "Text");
+  }
+
+  /** Host keys the emulated keyboard never receives: F2–F24 (app shortcuts), Tab (focus). */
+  const HOST_KEY = /^(?:Tab|AltGraph|F(?:[2-9]|1\d|2[0-4]))$/;
+
+  /**
+   * True when a key event is for the emulated keyboard. Ctrl/Meta/Alt combinations stay with the
+   * host (shortcuts), but AltGr characters pass (Windows reports AltGr as Ctrl+Alt).
+   */
+  export function isMachineKey(e: KeyboardEvent): boolean {
+    if (e.isComposing) return false;
+    const altGr = e.getModifierState?.("AltGraph") ?? false;
+    if (!altGr && (e.ctrlKey || e.metaKey || e.altKey)) return false;
+    return !HOST_KEY.test(e.key);
+  }
+
+  /** Stable id of a physical key for down/up pairing. */
+  export function keyId(e: KeyboardEvent): string {
+    return e.code || `key:${e.key}`;
+  }
+
+  const MOUSE_JOYSTICK_KEY = "videoMouseJoystick";
+
+  function loadMouseJoystick(): boolean {
+    try {
+      return localStorage.getItem(MOUSE_JOYSTICK_KEY) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  /** Mouse-as-right-joystick preference (off by default, persisted). */
+  export const mouseJoystickEnabled = writable(loadMouseJoystick());
+
+  mouseJoystickEnabled.subscribe((on) => {
+    try {
+      localStorage.setItem(MOUSE_JOYSTICK_KEY, String(on));
+    } catch {
+      /* storage unavailable */
+    }
+  });
+
+  /** Pointer position over the canvas → joystick axes 0..63 across the 256×192 active area. */
+  export function joystickAxes(
+    pointer: { clientX: number; clientY: number },
+    canvas: HTMLCanvasElement,
+    frame: VideoFrame,
+  ): [number, number] {
+    const rect = canvas.getBoundingClientRect();
+    if (!(rect.width > 0) || !(rect.height > 0)) return [32, 32];
+    const fx = ((pointer.clientX - rect.left) / rect.width) * frame.width - frame.active_x;
+    const fy = ((pointer.clientY - rect.top) / rect.height) * frame.height - frame.active_y;
+    const axis = (v: number, size: number) => Math.min(63, Math.max(0, Math.floor((v / size) * 64)));
+    return [axis(fx, frame.active_width), axis(fy, frame.active_height)];
+  }
+
+  /** Drives the right joystick: moves are sent at most once per animation frame, button changes at once. */
+  export class MouseJoystick {
+    #x = 32;
+    #y = 32;
+    #button = false;
+    #sent = "";
+    #raf = 0;
+
+    move(x: number, y: number): void {
+      this.#x = x;
+      this.#y = y;
+      if (!this.#raf) {
+        this.#raf = requestAnimationFrame(() => {
+          this.#raf = 0;
+          this.#flush();
+        });
+      }
+    }
+
+    press(button: boolean): void {
+      this.#button = button;
+      this.#flush();
+    }
+
+    release(): void {
+      if (this.#button) this.press(false);
+    }
+
+    dispose(): void {
+      if (this.#raf) cancelAnimationFrame(this.#raf);
+      this.#raf = 0;
+      this.release();
+    }
+
+    #flush(): void {
+      const state = `${this.#x},${this.#y},${this.#button}`;
+      if (state === this.#sent) return;
+      this.#sent = state;
+      setJoystick(0, this.#x, this.#y, this.#button).catch(() => {
+        /* no joystick on this machine */
+      });
+    }
+  }
+</script>
+
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { t } from "../i18n";
+  import * as api from "../api";
   import Icon from "./Icon.svelte";
   import EmptyState from "./EmptyState.svelte";
-  import { fmtAddr } from "../format";
-  import type { VideoFrame } from "../types";
+  import { fmtAddr, fmtByte } from "../format";
 
   let {
     frame,
@@ -12,7 +192,6 @@
     onGoto,
     onFullscreen,
     onClose,
-    onKey,
   }: {
     frame: VideoFrame | null;
     keyboardEnabled?: boolean;
@@ -20,132 +199,127 @@
     onGoto: (addr: number) => void;
     onFullscreen: () => void;
     onClose: () => void;
+    /** @deprecated Ignored: the panel sends keys itself via `api.machineKeyEvent(code, down, key)`. */
     onKey?: (code: string, down: boolean) => void;
   } = $props();
 
   let bodyEl: HTMLDivElement | undefined = $state();
+  let canvasEl: HTMLCanvasElement | undefined = $state();
   let focused = $state(false);
-  /** Pixel font-size fitted so the full cols×rows grid is visible. */
-  let fontPx = $state(12);
+  /** Content box of the panel body (space for the screen). */
+  let boxW = $state(0);
+  let boxH = $state(0);
 
-  function handleKey(e: KeyboardEvent, down: boolean) {
-    if (!keyboardEnabled || !onKey || !focused) return;
-    // Keep browser shortcuts with modifiers for the host UI.
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    // Ignore auto-repeat for modifiers we don't need; allow for letters/backspace.
-    e.preventDefault();
-    e.stopPropagation();
-    onKey(e.code, down);
-  }
+  const painter = new FramePainter();
+  const joystick = new MouseJoystick();
+  /** Keys sent down to the machine and not yet released. */
+  const pressed = new Set<string>();
 
-  function modeLabel(mode: string): string {
-    return mode
-      .replace(/([A-Za-z])(\d)/g, "$1 $2")
-      .replace(/(\d)x(\d)/gi, "$1×$2");
-  }
-
-  const displayRows = $derived(
-    frame && frame.rows_text.length > 0
-      ? frame.rows_text
-      : frame
-        ? Array.from({ length: frame.rows }, (_, row) =>
-            frame.cells
-              .slice(row * frame.cols, (row + 1) * frame.cols)
-              .map((cell) => {
-                if (cell & 0x80) return "\u00b7";
-                if (cell === 0 || cell === 0xff) return " ";
-                const code = cell & 0x3f;
-                if (code < 0x20) return String.fromCharCode(code + 0x40);
-                return String.fromCharCode(code);
-              })
-              .join("")
-          )
-        : []
+  const scale = $derived(frame ? fitScale(boxW - 2, boxH - 2, frame.width, frame.height) : 0);
+  const cssWidth = $derived(frame ? frame.width * scale : 0);
+  const cssHeight = $derived(frame ? frame.height * scale : 0);
+  const details = $derived(
+    frame
+      ? `${fmtAddr(frame.base_addr)}–${fmtAddr((frame.base_addr + Math.max(frame.vram_bytes, 1) - 1) & 0xffff)} · SAM V=${frame.sam_v} F=${fmtByte(frame.sam_f)} · PIA1 PB=${fmtByte(frame.vdg_ctrl)}`
+      : "",
   );
 
-  const visibleRows = $derived.by(() => {
-    if (displayRows.length === 0) return [];
-    const keepFullGrid =
-      frame?.mode === "Text32x16" ||
-      frame?.mode === "Semigraphics4" ||
-      frame?.mode === "Semigraphics6" ||
-      frame?.mode === "Unknown";
-    if (keepFullGrid) return displayRows;
-    let end = displayRows.length;
-    while (end > 0 && displayRows[end - 1].trim() === "") end -= 1;
-    return displayRows.slice(0, Math.max(end, 1));
+  $effect(() => {
+    const canvas = canvasEl;
+    const current = frame;
+    if (canvas && current) painter.paint(canvas, current);
   });
-
-  /** Always honour the machine text grid (32×16), never shrink to content. */
-  const displayCols = $derived(frame?.cols ?? 32);
-  const displayRowCount = $derived(
-    frame?.mode === "Text32x16" || frame?.mode === "Semigraphics4" || frame?.mode === "Semigraphics6"
-      ? (frame?.rows ?? 16)
-      : visibleRows.length > 0
-        ? visibleRows.length
-        : (frame?.rows ?? 16)
-  );
-
-  /** Pad/truncate each row to exactly displayCols so the grid is stable. */
-  const gridRows = $derived.by(() => {
-    const cols = displayCols;
-    const rows = displayRowCount;
-    const src = visibleRows;
-    const out: string[] = [];
-    for (let r = 0; r < rows; r++) {
-      let line = src[r] ?? "";
-      if (line.length < cols) line = line.padEnd(cols, " ");
-      else if (line.length > cols) line = line.slice(0, cols);
-      out.push(line);
-    }
-    return out;
-  });
-
-  const screenText = $derived(gridRows.join("\n"));
-
-  /**
-   * Fit the full monospaced grid into the panel.
-   * CSS uses `1ch` per column and `line-height` per row — metrics must match.
-   */
-  function fitFont(width: number, height: number, cols: number, rows: number) {
-    if (width < 32 || height < 32 || cols < 1 || rows < 1) return;
-    const outerPad = 20; // .crt-body padding + border slack
-    const lineRatio = 1.2;
-    const charW = 1.0; // matches CSS `1ch` for mono fonts
-    const padX = 0.55;
-    const padY = 0.45;
-    const availW = Math.max(0, width - outerPad);
-    const availH = Math.max(0, height - outerPad);
-    const byW = availW / (cols * charW + 2 * padX);
-    const byH = availH / (rows * lineRatio + 2 * padY);
-    // 0.96 safety so borders/scrollbars never clip a column
-    const next = Math.floor(Math.min(byW, byH) * 0.96 * 10) / 10;
-    fontPx = Math.max(8, Math.min(36, next));
-  }
 
   $effect(() => {
     const el = bodyEl;
-    const cols = displayCols;
-    const rows = displayRowCount;
-    // touch screenText so we remeasure when frame content layout changes
-    void screenText;
     if (!el) return;
-
-    const measure = () => {
-      const r = el.getBoundingClientRect();
-      fitFont(r.width, r.height, cols, rows);
-    };
-    measure();
-
     const ro = new ResizeObserver((entries) => {
-      const cr = entries[0]?.contentRect;
-      if (!cr) return;
-      fitFont(cr.width, cr.height, cols, rows);
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      boxW = box.width;
+      boxH = box.height;
     });
     ro.observe(el);
     return () => ro.disconnect();
   });
+
+  function send(code: string, down: boolean, key: string) {
+    api.machineKeyEvent(code, down, key).catch(() => {
+      /* ignore key routing errors while paused/busy */
+    });
+  }
+
+  function handleKey(e: KeyboardEvent, down: boolean) {
+    if (!keyboardEnabled || !focused || !frame) return;
+    const id = keyId(e);
+    if (down) {
+      if (!isMachineKey(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat && pressed.has(id)) return;
+      pressed.add(id);
+      send(e.code, true, e.key);
+    } else if (pressed.delete(id)) {
+      e.preventDefault();
+      e.stopPropagation();
+      send(e.code, false, e.key);
+    }
+  }
+
+  /** Let go of every key (focus or window lost) so none stays stuck in the matrix. */
+  function releaseKeys() {
+    const any = pressed.size > 0;
+    pressed.clear();
+    if (keyboardEnabled && (any || focused)) {
+      api.machineKeysClear().catch(() => {});
+    }
+  }
+
+  function handleBlur() {
+    releaseKeys();
+    focused = false;
+    joystick.release();
+  }
+
+  function handleVisibility() {
+    if (document.visibilityState === "hidden") {
+      releaseKeys();
+      joystick.release();
+    }
+  }
+
+  function toggleMouseJoystick() {
+    const on = !$mouseJoystickEnabled;
+    mouseJoystickEnabled.set(on);
+    if (!on) joystick.release();
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    if (!$mouseJoystickEnabled || !frame || !canvasEl) return;
+    const [x, y] = joystickAxes(e, canvasEl, frame);
+    joystick.move(x, y);
+  }
+
+  function handlePointerDown(e: PointerEvent) {
+    if (!$mouseJoystickEnabled || !frame || !canvasEl || e.button !== 0) return;
+    const [x, y] = joystickAxes(e, canvasEl, frame);
+    joystick.move(x, y);
+    joystick.press(true);
+    bodyEl?.setPointerCapture?.(e.pointerId);
+  }
+
+  function handlePointerUp(e: PointerEvent) {
+    if (e.button === 0) joystick.release();
+  }
+
+  onDestroy(() => {
+    releaseKeys();
+    joystick.dispose();
+  });
 </script>
+
+<svelte:window onblur={handleBlur} />
+<svelte:document onvisibilitychange={handleVisibility} />
 
 <div class="panel video-panel panel-primary">
   <div class="panel-header">
@@ -158,8 +332,22 @@
         {#if keyboardEnabled}
           <span class="kbd-hint mono" class:on={focused}>{$t("machine.kbdHint")}</span>
         {/if}
-        <span class="mode mono">{modeLabel(frame.mode)}</span>
-        <span class="dims mono">{displayCols}×{displayRowCount}</span>
+        <span class="mode mono" title={details}>{modeLabel(frame.mode)}</span>
+        <span class="dims mono" title={details}>{frame.cols}×{frame.rows}</span>
+        <button
+          class="hdr-btn"
+          class:active={$mouseJoystickEnabled}
+          aria-pressed={$mouseJoystickEnabled}
+          onclick={toggleMouseJoystick}
+          title={$t("video.mouseJoystickHint")}
+          aria-label={$t("video.mouseJoystick")}
+        >
+          <svg class="icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="4" r="2.4" fill="currentColor" />
+            <path d="M8 6.4v4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <path d="M2.5 11.5h11v2.5h-11z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+          </svg>
+        </button>
         <button class="hdr-btn" onclick={() => onGoto(frame.base_addr)} title={fmtAddr(frame.base_addr)} aria-label={$t("machine.ioGoto")}>
           <Icon name="external" size={13} />
         </button>
@@ -172,31 +360,36 @@
       </button>
     </div>
   </div>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="panel-body crt-body"
     class:kbd-focus={focused && keyboardEnabled}
+    class:joystick={$mouseJoystickEnabled && !!frame}
     bind:this={bodyEl}
     tabindex={keyboardEnabled ? 0 : -1}
     role={keyboardEnabled ? "application" : undefined}
     aria-label={keyboardEnabled ? $t("machine.kbdCapture") : undefined}
     onfocus={() => (focused = true)}
-    onblur={() => (focused = false)}
+    onblur={handleBlur}
     onkeydown={(e) => handleKey(e, true)}
     onkeyup={(e) => handleKey(e, false)}
+    onpointermove={handlePointerMove}
+    onpointerdown={handlePointerDown}
+    onpointerup={handlePointerUp}
+    onlostpointercapture={() => joystick.release()}
   >
     {#if !frame}
       <EmptyState icon="video" message={$t("machine.videoEmpty")} size={13} />
     {:else}
-      <div class="crt">
-        <pre
-          class="screen mono"
-          style:--cols={displayCols}
-          style:--rows={displayRowCount}
-          style:font-size="{fontPx}px"
-        >{screenText}</pre>
-        <div class="scanlines" aria-hidden="true"></div>
-        <div class="crt-glow" aria-hidden="true"></div>
-      </div>
+      <canvas
+        class="screen"
+        bind:this={canvasEl}
+        style:width="{cssWidth}px"
+        style:height="{cssHeight}px"
+        aria-label={$t("video.screen")}
+      ></canvas>
     {/if}
   </div>
 </div>
@@ -205,6 +398,20 @@
   .video-panel {
     height: 100%;
     min-height: 0;
+    container-type: inline-size;
+  }
+
+  .video-panel .panel-header .ph-title,
+  .video-panel .panel-header .mode,
+  .video-panel .panel-header .dims,
+  .video-panel .panel-header .kbd-hint {
+    white-space: nowrap;
+  }
+
+  .video-panel .panel-header .ph-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .video-panel .panel-header .mode {
@@ -235,6 +442,25 @@
     color: var(--accent);
   }
 
+  /* Narrow dock: drop the least important header details first. */
+  @container (max-width: 560px) {
+    .video-panel .panel-header .fw {
+      display: none;
+    }
+  }
+
+  @container (max-width: 440px) {
+    .video-panel .panel-header .kbd-hint {
+      display: none;
+    }
+  }
+
+  @container (max-width: 320px) {
+    .video-panel .panel-header .dims {
+      display: none;
+    }
+  }
+
   .crt-body {
     display: flex;
     align-items: center;
@@ -251,64 +477,19 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
-  .crt {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    max-width: 100%;
-    max-height: 100%;
+  .crt-body.joystick {
+    cursor: crosshair;
+    touch-action: none;
   }
 
   .screen {
-    --line-ratio: 1.2;
-    --pad-x: 0.55em;
-    --pad-y: 0.45em;
-    position: relative;
-    margin: 0;
-    box-sizing: content-box;
-    font-family: var(--font-mono), ui-monospace, "Cascadia Mono", "Consolas", monospace;
-    font-weight: 500;
-    font-variant-ligatures: none;
-    font-feature-settings: "liga" 0, "calt" 0;
-    letter-spacing: 0;
-    line-height: var(--line-ratio);
-    color: var(--crt-phosphor);
-    background: transparent;
-    text-shadow: 0 0 5px var(--crt-glow);
+    display: block;
+    flex: none;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
     border: 1px solid var(--crt-border);
-    border-radius: 6px;
-    padding: var(--pad-y) var(--pad-x);
-    white-space: pre;
-    /* Exact grid: one `ch` per column — must match fitFont charW */
-    width: calc(var(--cols) * 1ch);
-    max-width: 100%;
-    overflow: hidden;
-    z-index: 1;
-  }
-
-  .scanlines {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      to bottom,
-      var(--crt-scanline) 0px,
-      var(--crt-scanline) 1px,
-      transparent 1px,
-      transparent 3px
-    );
-    mix-blend-mode: multiply;
-    border-radius: 6px;
-    z-index: 2;
-  }
-
-  .crt-glow {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
-    border-radius: 6px;
-    z-index: 3;
+    border-radius: 4px;
+    box-shadow: 0 0 18px color-mix(in srgb, var(--crt-glow) 35%, transparent);
+    user-select: none;
   }
 </style>

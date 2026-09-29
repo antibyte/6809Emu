@@ -136,28 +136,56 @@ fn mame_daa_high_nibble_adjust() {
 
 #[test]
 fn mame_cwai_waits_when_irq_masked() {
-    let mut emu = run_program(&[0x3C, 0xFF]);
+    let mut emu = run_program(&[0x3C, 0xFF, 0x86, 0x42]);
     emu.memory.write16(0xFFF8, 0x0200);
     emu.cpu.irq_pending = true;
     emu.cpu.cc.insert(Flags::I);
     let step = emu.step();
     assert_eq!(step.mnemonic, "CWAI");
-    assert!(emu.cpu.halted);
     assert!(emu.cpu.cwai_waiting);
+    // A masked IRQ must not end the wait: no instruction after CWAI runs.
+    for _ in 0..10 {
+        let wait = emu.step();
+        assert_eq!(wait.mnemonic, "CWAI");
+    }
+    assert_eq!(emu.cpu.a, 0x00);
+    assert!(emu.cpu.cwai_waiting);
+}
+
+#[test]
+fn mame_cwai_takes_unmasked_irq_without_restacking() {
+    // CWAI #$EF clears I; the entire state is stacked once, the IRQ only vectors.
+    let mut emu = run_program(&[0x3C, 0xEF]);
+    emu.memory.write16(0xFFF8, 0x0200);
+    emu.cpu.s = 0x0F00;
+    emu.cpu.cc = Flags::I | Flags::F;
+    let step = emu.step();
+    assert_eq!(step.mnemonic, "CWAI");
+    assert!(emu.cpu.cwai_waiting);
+    assert_eq!(emu.cpu.s, 0x0F00 - 12);
+    assert!(!emu.cpu.cc.contains(Flags::I), "CWAI must not set I while waiting");
+    emu.trigger_irq();
+    let entry = emu.step();
+    assert_eq!(emu.cpu.pc, 0x0200);
+    assert_eq!(emu.cpu.s, 0x0F00 - 12, "no second frame");
+    assert_eq!(step.cycles + entry.cycles, 20, "CWAI total = 20 cycles");
+    assert!(emu.cpu.cc.contains(Flags::I));
+    assert!(emu.cpu.cc.contains(Flags::F), "F was set before and stays set");
 }
 
 #[test]
 fn mame_sync_wakes_on_masked_irq_line() {
     let mut emu = run_program(&[0x13, 0x12]);
     emu.step();
-    assert!(emu.cpu.halted);
+    assert!(emu.cpu.sync_waiting);
+    let wait = emu.step();
+    assert_eq!(wait.mnemonic, "SYNC");
+    assert_eq!(emu.cpu.pc, 0x0101);
     emu.cpu.irq_pending = true;
     emu.cpu.cc.insert(Flags::I);
-    let step = emu.step();
-    assert_eq!(step.mnemonic, "SYNC");
-    assert_eq!(emu.cpu.pc, 0x0101);
     let step2 = emu.step();
     assert_eq!(step2.mnemonic, "NOP");
+    assert!(!emu.cpu.sync_waiting);
 }
 
 // ── ORCC/ANDCC ──────────────────────────────────────────────────────

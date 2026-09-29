@@ -205,8 +205,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional code signing — set these repo secrets when ready:
-          # TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          # Required for in-app updates (see README → In-App Updates):
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Optional OS code signing:
           # APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
           # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
         with:
@@ -222,6 +224,7 @@ jobs:
 
             ### Notes
             - CoCo 2 / Dragon 32 profiles include Microsoft BASIC ROMs for private use.
+            - Existing installs can update via **Help → Check for updates…**.
             - See the README for development setup.
 
             **Full changelog:** https://github.com/${{ github.repository }}/compare/${{ needs.prepare.outputs.tag }}@%5E...${{ needs.prepare.outputs.tag }}
@@ -230,7 +233,7 @@ jobs:
           args: ${{ matrix.args }}
           projectPath: .
           tauriScript: npm run tauri
-          includeUpdaterJson: false
+          includeUpdaterJson: true
 
   # ---------------------------------------------------------------------------
   # Optional: run Rust tests once on Linux for the release tag

@@ -20,6 +20,22 @@ pub struct EffectiveAddress {
     pub extra_cycles: u8,
     pub postbyte: Option<u8>,
     pub index_reg: Option<char>,
+    /// Offset / address bytes consumed after the postbyte (for trace and disassembly).
+    pub bytes: Vec<u8>,
+}
+
+/// Fetch one operand byte at PC, advance PC and record it.
+fn fetch_operand(cpu: &mut Cpu, mem: &Memory, bytes: &mut Vec<u8>) -> u8 {
+    let value = mem.read8(cpu.pc);
+    cpu.pc = cpu.pc.wrapping_add(1);
+    bytes.push(value);
+    value
+}
+
+fn fetch_operand16(cpu: &mut Cpu, mem: &Memory, bytes: &mut Vec<u8>) -> u16 {
+    let hi = fetch_operand(cpu, mem, bytes) as u16;
+    let lo = fetch_operand(cpu, mem, bytes) as u16;
+    (hi << 8) | lo
 }
 
 pub fn direct_addr(cpu: &Cpu, mem: &Memory) -> u16 {
@@ -106,6 +122,13 @@ pub enum IndexMode {
     WPreDec2,
 }
 
+/// Indexed postbytes that raise the HD6309 illegal-instruction trap:
+/// `[,-R]` ($92/$B2/$D2/$F2) and extended indirect with register bits set
+/// ($BF/$DF/$FF). (`[,R+]` is reused for the W modes on the 6309.)
+pub fn is_illegal_hd6309_postbyte(postbyte: u8) -> bool {
+    matches!(postbyte, 0x92 | 0xB2 | 0xD2 | 0xF2 | 0xBF | 0xDF | 0xFF)
+}
+
 /// Whether this mode is indirect.
 fn is_indirect(postbyte: u8) -> bool {
     (postbyte & 0x10) != 0 && (postbyte & 0x80) != 0
@@ -171,19 +194,26 @@ pub fn decode_index_mode(postbyte: u8) -> (IndexMode, bool, u8, u8) {
     (mode, indirect, extra_bytes, reg_bits)
 }
 
-/// Compute extra cycles for an indexed mode (M6809 cycle counts).
-fn index_extra_cycles(mode: IndexMode, indirect: bool) -> u8 {
+/// Extra cycles of an indexed mode on top of the instruction's base count
+/// (MC6809 datasheet "Indexed Addressing Modes" table; indirect adds 3).
+/// The HD6309-only W modes use the emulation-mode counts measured on real
+/// silicon (hoglet67 6809Decoder). Native-mode differences are applied by
+/// `hd6309_native_cycles`.
+pub fn index_extra_cycles(mode: IndexMode, indirect: bool) -> u8 {
     let base = match mode {
-        IndexMode::Const5(_) | IndexMode::ZeroOffset => 0,
+        IndexMode::ZeroOffset | IndexMode::WBase => 0,
+        IndexMode::Const5(_) => 1,
         IndexMode::AutoInc1 | IndexMode::AutoDec1 => 2,
         IndexMode::AutoInc2 | IndexMode::AutoDec2 => 3,
-        IndexMode::AccA | IndexMode::AccB | IndexMode::AccE | IndexMode::AccF
-        | IndexMode::AccW | IndexMode::AccD => 1,
-        IndexMode::WBase => 1,
-        IndexMode::WOff16 => 2,
-        IndexMode::WPostInc2 | IndexMode::WPreDec2 => 2,
+        IndexMode::WPostInc2 | IndexMode::WPreDec2 => 1,
+        IndexMode::AccA | IndexMode::AccB | IndexMode::AccE | IndexMode::AccF => 1,
+        IndexMode::AccW => 1,
+        IndexMode::AccD => 4,
         IndexMode::Off8Signed | IndexMode::Pcr8 => 1,
-        IndexMode::Off16Signed | IndexMode::Pcr16 => 2,
+        IndexMode::WOff16 => 2,
+        IndexMode::Off16Signed => 4,
+        IndexMode::Pcr16 => 5,
+        // [n16]: 5 cycles in total (2 + indirection)
         IndexMode::IndirectExtended => 2,
     };
     if indirect {
@@ -194,7 +224,15 @@ fn index_extra_cycles(mode: IndexMode, indirect: bool) -> u8 {
 }
 
 /// Format an indexed operand for disassembly / trace output.
+/// PCR offsets are shown as raw offsets; see [`format_index_operand_at`].
 pub fn format_index_operand(postbyte: u8, extra: &[u8]) -> String {
+    format_index_operand_at(postbyte, extra, None)
+}
+
+/// Format an indexed operand. With `pc_after` (PC following the operand bytes)
+/// PC-relative modes are shown as their target address (`$1234,PCR`), which is
+/// what Motorola assemblers expect back.
+pub fn format_index_operand_at(postbyte: u8, extra: &[u8], pc_after: Option<u16>) -> String {
     let indirect = is_indirect(postbyte);
     if let Some((w_mode, _)) = decode_hd6309_w_mode(postbyte) {
         let inner = match w_mode {
@@ -251,11 +289,17 @@ pub fn format_index_operand(postbyte: u8, extra: &[u8]) -> String {
         }
         IndexMode::Pcr8 if !extra.is_empty() => {
             let off = extra[0] as i8 as i16;
-            format!("{off},PCR")
+            match pc_after {
+                Some(pc) => format!("${:04X},PCR", pc.wrapping_add(off as u16)),
+                None => format!("{off},PCR"),
+            }
         }
         IndexMode::Pcr16 if extra.len() >= 2 => {
             let off = i16::from_be_bytes([extra[0], extra[1]]);
-            format!("{off},PCR")
+            match pc_after {
+                Some(pc) => format!("${:04X},PCR", pc.wrapping_add(off as u16)),
+                None => format!("{off},PCR"),
+            }
         }
         IndexMode::IndirectExtended if extra.len() >= 2 => {
             let addr = u16::from_be_bytes([extra[0], extra[1]]);
@@ -273,16 +317,18 @@ pub fn format_index_operand(postbyte: u8, extra: &[u8]) -> String {
 
 pub fn indexed_addr(cpu: &mut Cpu, mem: &Memory, postbyte: u8) -> EffectiveAddress {
     let indirect = is_indirect(postbyte);
+    let mut bytes = Vec::new();
     if cpu.variant == CpuVariant::Hd6309 {
-        if let Some((w_mode, extra_bytes)) = decode_hd6309_w_mode(postbyte) {
+        if let Some((w_mode, _)) = decode_hd6309_w_mode(postbyte) {
             let (final_addr, cycles) =
-                compute_hd6309_w_addr(cpu, mem, w_mode, indirect, extra_bytes);
+                compute_hd6309_w_addr(cpu, mem, w_mode, indirect, &mut bytes);
             return EffectiveAddress {
                 mode: AddrMode::Indexed,
                 addr: final_addr,
                 extra_cycles: cycles,
                 postbyte: Some(postbyte),
                 index_reg: Some('W'),
+                bytes,
             };
         }
     }
@@ -308,7 +354,7 @@ pub fn indexed_addr(cpu: &mut Cpu, mem: &Memory, postbyte: u8) -> EffectiveAddre
         }
     };
 
-    let (final_addr, cycles) = compute_indexed_addr(cpu, mem, mode, indirect, extra_bytes, base);
+    let (final_addr, cycles) = compute_indexed_addr(cpu, mem, mode, indirect, base, &mut bytes);
 
     update_auto_inc_dec(cpu, mode, reg_bits);
 
@@ -318,6 +364,7 @@ pub fn indexed_addr(cpu: &mut Cpu, mem: &Memory, postbyte: u8) -> EffectiveAddre
         extra_cycles: cycles,
         postbyte: Some(postbyte),
         index_reg,
+        bytes,
     }
 }
 
@@ -326,8 +373,8 @@ fn compute_indexed_addr(
     mem: &Memory,
     mode: IndexMode,
     indirect: bool,
-    _extra_bytes: u8,
     base: u16,
+    bytes: &mut Vec<u8>,
 ) -> (u16, u8) {
     let extra_cycles = index_extra_cycles(mode, indirect);
 
@@ -348,30 +395,17 @@ fn compute_indexed_addr(
             base.wrapping_add((cpu.w & 0xFF) as i8 as i16 as u16)
         }
         IndexMode::AccW if cpu.variant == CpuVariant::Hd6309 => base.wrapping_add(cpu.w),
-        IndexMode::Off8Signed => {
-            let off = mem.read8(cpu.pc) as i8 as i16;
-            cpu.pc = cpu.pc.wrapping_add(1);
+        IndexMode::Off8Signed | IndexMode::Pcr8 => {
+            // PCR: base = PC after the offset byte (computed by the caller)
+            let off = fetch_operand(cpu, mem, bytes) as i8 as i16;
             base.wrapping_add(off as u16)
         }
-        IndexMode::Off16Signed => {
-            let off = mem.read16(cpu.pc) as i16 as i32;
-            cpu.pc = cpu.pc.wrapping_add(2);
-            base.wrapping_add(off as u16)
-        }
-        IndexMode::Pcr8 => {
-            let off = mem.read8(cpu.pc) as i8 as i16;
-            cpu.pc = cpu.pc.wrapping_add(1);
-            // base = PC after postbyte + extra bytes (already computed)
-            base.wrapping_add(off as u16)
-        }
-        IndexMode::Pcr16 => {
-            let off = mem.read16(cpu.pc) as i16 as i32;
-            cpu.pc = cpu.pc.wrapping_add(2);
-            base.wrapping_add(off as u16)
+        IndexMode::Off16Signed | IndexMode::Pcr16 => {
+            let off = fetch_operand16(cpu, mem, bytes);
+            base.wrapping_add(off)
         }
         IndexMode::IndirectExtended => {
-            let ptr_addr = mem.read16(cpu.pc);
-            cpu.pc = cpu.pc.wrapping_add(2);
+            let ptr_addr = fetch_operand16(cpu, mem, bytes);
             mem.read16(ptr_addr)
         }
         _ => base,
@@ -403,15 +437,14 @@ fn compute_hd6309_w_addr(
     mem: &Memory,
     mode: IndexMode,
     indirect: bool,
-    _extra_bytes: u8,
+    bytes: &mut Vec<u8>,
 ) -> (u16, u8) {
     let extra_cycles = index_extra_cycles(mode, indirect);
     let direct_addr = match mode {
         IndexMode::WBase => cpu.w,
         IndexMode::WOff16 => {
-            let off = mem.read16(cpu.pc) as i16 as i32;
-            cpu.pc = cpu.pc.wrapping_add(2);
-            cpu.w.wrapping_add(off as u16)
+            let off = fetch_operand16(cpu, mem, bytes);
+            cpu.w.wrapping_add(off)
         }
         IndexMode::WPostInc2 => {
             let ea = cpu.w;

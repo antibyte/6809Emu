@@ -4,6 +4,8 @@
   import CollapseButton from "./CollapseButton.svelte";
   import { fmtAddr, fmtByte, toHex } from "../format";
 
+  type RegCell = { label: string; value: number; highlight?: boolean };
+
   let {
     cpu,
     collapsed = false,
@@ -30,7 +32,7 @@
 
   const isHd6309 = $derived(cpu?.variant === "hd6309");
 
-  const regs16 = $derived(
+  const regs16: RegCell[] = $derived(
     cpu
       ? [
           { label: "D", value: cpu.d },
@@ -49,7 +51,7 @@
       : []
   );
 
-  const regs8 = $derived(
+  const regs8: RegCell[] = $derived(
     cpu
       ? [
           { label: "A", value: cpu.a },

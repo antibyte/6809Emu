@@ -71,11 +71,27 @@ fn mul_z_flag_from_d_register() {
 
 #[test]
 fn hd6309_still_traps_illegal_page1() {
+    // $87 is the 6809's undocumented "STA #"; the 6309 has no such opcode.
     let mut emu = Emulator::new();
     emu.set_variant(CpuVariant::Hd6309);
-    emu.load_and_reset(0x0100, &[0x01], 0x0100).unwrap();
+    emu.load_and_reset(0x0100, &[0x87], 0x0100).unwrap();
     let step = emu.step();
     assert_eq!(step.trap, Some(m6809_core::types::Trap::IllegalOpcode));
+    assert_ne!(emu.cpu.mode_reg & 0x40, 0);
+}
+
+#[test]
+fn hd6309_opcode_01_is_oim_not_the_6809_neg_alias() {
+    // OIM #$0F,<$42 on the 6309; NEG <$42 alias on the 6809.
+    let mut emu = Emulator::new();
+    emu.set_variant(CpuVariant::Hd6309);
+    emu.load_and_reset(0x0100, &[0x01, 0x0F, 0x42], 0x0100).unwrap();
+    emu.memory.write8(0x0042, 0x50);
+    let step = emu.step();
+    assert_eq!(step.mnemonic, "OIM");
+    assert!(step.trap.is_none());
+    assert_eq!(emu.memory.read8(0x0042), 0x5F);
+    assert_eq!(emu.cpu.pc, 0x0103);
 }
 
 #[test]

@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashSet;
 
 use crate::io_map::{IoWriteResult, MemoryIo};
@@ -10,6 +11,9 @@ pub struct Memory {
     pub io: Option<Box<dyn MemoryIo>>,
     watchpoints: HashSet<u16>,
     watchpoint_trigger: Option<u16>,
+    /// While set, CPU writes are dropped (an HD6309 instruction aborted by an
+    /// illegal indexed postbyte must not store anything before it traps).
+    write_inhibit: Cell<bool>,
 }
 
 impl Clone for Memory {
@@ -20,6 +24,7 @@ impl Clone for Memory {
             io: self.io.as_ref().map(|io| io.clone_box()),
             watchpoints: self.watchpoints.clone(),
             watchpoint_trigger: self.watchpoint_trigger,
+            write_inhibit: Cell::new(false),
         }
     }
 }
@@ -38,6 +43,7 @@ impl Memory {
             io: None,
             watchpoints: HashSet::new(),
             watchpoint_trigger: None,
+            write_inhibit: Cell::new(false),
         }
     }
 
@@ -50,7 +56,36 @@ impl Memory {
         self.ram[addr as usize]
     }
 
+    /// Side-effect-free read for debugger views: never clears device flags or
+    /// consumes device data (unlike [`Memory::read8`], which is a CPU bus read).
+    pub fn peek8(&self, addr: u16) -> u8 {
+        if let Some(io) = &self.io {
+            if let Some(value) = io.peek(addr, &self.ram) {
+                return value;
+            }
+        }
+        self.ram[addr as usize]
+    }
+
+    pub fn peek16(&self, addr: u16) -> u16 {
+        let hi = self.peek8(addr) as u16;
+        let lo = self.peek8(addr.wrapping_add(1)) as u16;
+        (hi << 8) | lo
+    }
+
+    /// Drop CPU writes until cleared (see `write_inhibit`).
+    pub(crate) fn set_write_inhibit(&self, on: bool) {
+        self.write_inhibit.set(on);
+    }
+
     pub fn write8(&mut self, addr: u16, value: u8) {
+        if self.write_inhibit.get() {
+            return;
+        }
+        // Watchpoints fire on every CPU write, including I/O registers and ROM.
+        if self.watchpoints.contains(&addr) {
+            self.watchpoint_trigger = Some(addr);
+        }
         if let Some(io) = self.io.as_mut() {
             match io.write(addr, value, &mut self.ram) {
                 IoWriteResult::Consumed | IoWriteResult::Ignored => return,
@@ -58,9 +93,6 @@ impl Memory {
             }
         }
         self.ram[addr as usize] = value;
-        if self.watchpoints.contains(&addr) {
-            self.watchpoint_trigger = Some(addr);
-        }
     }
 
     pub fn read16(&self, addr: u16) -> u16 {

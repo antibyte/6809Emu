@@ -19,7 +19,9 @@ export type PanelId =
   | "terminal"
   | "video"
   | "pia"
-  | "ay";
+  | "ay"
+  | "speech"
+  | "peripherals";
 
 export type SidebarSection =
   | "registers"
@@ -27,7 +29,9 @@ export type SidebarSection =
   | "breakpoints"
   | "watchpoints"
   | "pia"
-  | "ay";
+  | "ay"
+  | "speech"
+  | "peripherals";
 
 export interface LayoutSizes {
   mainPct: number;
@@ -48,7 +52,7 @@ export interface LayoutState {
   sizes: LayoutSizes;
 }
 
-const STORAGE_KEY = "layoutState.v3";
+const STORAGE_KEY = "layoutState.v4";
 
 const DEFAULT: LayoutState = {
   visible: {
@@ -64,6 +68,8 @@ const DEFAULT: LayoutState = {
     video: false,
     pia: false,
     ay: false,
+    speech: false,
+    peripherals: false,
   },
   collapsed: {
     registers: false,
@@ -72,6 +78,8 @@ const DEFAULT: LayoutState = {
     watchpoints: false,
     pia: false,
     ay: false,
+    speech: false,
+    peripherals: false,
   },
   videoDocked: true,
   sizes: {
@@ -79,7 +87,16 @@ const DEFAULT: LayoutState = {
     sidebarPx: 290,
     disasmPct: 52,
     bottom: { memory: 40, trace: 34, terminal: 26 },
-    sidebarRows: { registers: 34, io: 22, breakpoints: 22, watchpoints: 22, pia: 28, ay: 28 },
+    sidebarRows: {
+      registers: 34,
+      io: 22,
+      breakpoints: 22,
+      watchpoints: 22,
+      pia: 28,
+      ay: 28,
+      speech: 28,
+      peripherals: 34,
+    },
     videoPx: 360,
   },
 };
@@ -117,7 +134,7 @@ function sanitize(raw: Partial<LayoutState> | null): LayoutState {
       }
     }
     if (sz.sidebarRows) {
-      for (const k of ["registers", "io", "breakpoints", "watchpoints", "pia", "ay"] as const) {
+      for (const k of ["registers", "io", "breakpoints", "watchpoints", "pia", "ay", "speech", "peripherals"] as const) {
         if (typeof sz.sidebarRows[k] === "number") s.sizes.sidebarRows[k] = clamp(sz.sidebarRows[k], 6, 80);
       }
     }
@@ -152,6 +169,15 @@ function load(): LayoutState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return sanitize(JSON.parse(raw));
+
+    // v3 -> v4: only added the "speech" panel/section; sanitize fills the
+    // new keys from DEFAULT so we keep the rest of the user's arrangement.
+    const v3 = localStorage.getItem("layoutState.v3");
+    if (v3) {
+      const state = sanitize(JSON.parse(v3));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return state;
+    }
 
     const legacy = localStorage.getItem("layoutState.v2");
     if (legacy) {

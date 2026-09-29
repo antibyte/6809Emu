@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from "../i18n";
   import Icon from "./Icon.svelte";
-  import { fmtAddr, fmtByte, toHex } from "../format";
+  import { fmtAddr, fmtByte } from "../format";
   import type { AyState } from "../types";
 
   let {
@@ -78,17 +78,48 @@
     return ((regs[12] << 8) | regs[11]) & 0xFFFF;
   }
 
-  function envShapeName(shape: number): string {
-    const cont = (shape & 1) !== 0;
-    const attack = (shape & 2) !== 0;
-    const alt = (shape & 4) !== 0;
-    const hold = (shape & 8) !== 0;
-    const parts: string[] = [];
-    parts.push(cont ? "Cont" : "OneShot");
-    parts.push(attack ? "Attack" : "Decay");
-    parts.push(alt ? "Alt" : "NoAlt");
-    parts.push(hold ? "Hold" : "NoHold");
-    return parts.join(" ");
+  /** Envelope ramp frequency: fE = fCLK / (256 * EP), EP = 0 acts as 1. */
+  function envHz(regs: number[], clock: number): string {
+    const hz = clock / 256 / Math.max(envPeriod(regs), 1);
+    return hz >= 100 ? hz.toFixed(0) : hz.toFixed(2);
+  }
+
+  /** Noise frequency: fN = fCLK / (16 * NP), NP = 0 acts as 1. */
+  function noiseHz(regs: number[], clock: number): number {
+    return Math.round(clock / 16 / Math.max(regs[6] & 0x1F, 1));
+  }
+
+  /** Set R13 bits by their datasheet names (bit3 CONT, bit2 ATT, bit1 ALT, bit0 HOLD). */
+  function envShapeBits(shape: number): string {
+    const names = ["HOLD", "ALT", "ATT", "CONT"];
+    const set = names.filter((_, bit) => (shape & (1 << bit)) !== 0).reverse();
+    return set.length ? set.join(" ") : "-";
+  }
+
+  /** Datasheet envelope drawing; CONT=0 shapes run one ramp, then hold at 0. */
+  function envGlyph(shape: number): string {
+    switch (shape & 0x0F) {
+      case 0x08:
+        return "\\\\\\\\";
+      case 0x0A:
+        return "\\/\\/";
+      case 0x0B:
+        return "\\‾‾‾";
+      case 0x0C:
+        return "////";
+      case 0x0D:
+        return "/‾‾‾";
+      case 0x0E:
+        return "/\\/\\";
+      case 0x04:
+      case 0x05:
+      case 0x06:
+      case 0x07:
+      case 0x0F:
+        return "/___";
+      default:
+        return "\\___"; // $00-$03, $09
+    }
   }
 </script>
 
@@ -125,7 +156,7 @@
     {:else}
       <div class="reg-table">
         {#each REG_LABELS as label, i}
-          <div class="reg-row" class:active={i === state.selected_register}>
+          <div class="reg-row" class:active={state.chip_selected !== false && i === state.selected_register}>
             <span class="reg-idx mono">{label}</span>
             <span class="reg-val mono">{fmtByte(state.registers[i] ?? 0)}</span>
           </div>
@@ -146,21 +177,40 @@
           <span class="sum-ch mono">{amp(state.registers, 2)}{envEnabled(state.registers, 2) ? " Env" : ""}</span>
         </div>
         <div class="summary-row">
-          <span class="sum-label">Tone</span>
+          <span class="sum-label">{$t("ay.tone")}</span>
           <span class="sum-ch" class:on={toneOn(state.registers, 0)}>A</span>
           <span class="sum-ch" class:on={toneOn(state.registers, 1)}>B</span>
           <span class="sum-ch" class:on={toneOn(state.registers, 2)}>C</span>
         </div>
         <div class="summary-row">
-          <span class="sum-label">Noise</span>
+          <span class="sum-label">{$t("ay.noise")}</span>
           <span class="sum-ch" class:on={noiseOn(state.registers, 0)}>A</span>
           <span class="sum-ch" class:on={noiseOn(state.registers, 1)}>B</span>
           <span class="sum-ch" class:on={noiseOn(state.registers, 2)}>C</span>
         </div>
         <div class="summary-row">
+          <span class="sum-label">{$t("ay.noiseFreq")}</span>
+          <span class="sum-ch mono wide">
+            NP {state.registers[6] & 0x1F} &middot; {noiseHz(state.registers, state.config.chip_clock_hz)} Hz
+          </span>
+        </div>
+        <div class="summary-row">
           <span class="sum-label">{$t("ay.envelope")}</span>
-          <span class="sum-ch mono" style="grid-column: 2 / -1">
-            {toHex(envPeriod(state.registers), 4)} {envShapeName(state.registers[13] & 0x0F)}
+          <span class="sum-ch mono wide" title={envShapeBits(state.registers[13])}>
+            <span class="env-glyph">{envGlyph(state.registers[13])}</span>
+            {fmtAddr(envPeriod(state.registers))} &middot; {envHz(state.registers, state.config.chip_clock_hz)} Hz
+            &middot; {$t("ay.envLevel")} {state.envelope_level ?? "-"}
+          </span>
+        </div>
+        <div class="summary-row">
+          <span class="sum-label">{$t("ay.latch")}</span>
+          <span class="sum-ch mono wide" class:off={state.chip_selected === false}>
+            {fmtByte(state.address_latch ?? state.selected_register)}
+            {#if state.chip_selected === false}
+              &middot; {$t("ay.deselected")}
+            {:else}
+              &rarr; R{state.selected_register}
+            {/if}
           </span>
         </div>
       </div>
@@ -283,6 +333,22 @@
     color: var(--accent);
     font-weight: 700;
     background: var(--accent-soft);
+  }
+
+  .sum-ch.wide {
+    grid-column: 2 / -1;
+    text-align: left;
+  }
+
+  .sum-ch.off {
+    color: var(--text-faint);
+  }
+
+  .env-glyph {
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: 6px;
+    letter-spacing: 0.05em;
   }
 
   .ay-ports {

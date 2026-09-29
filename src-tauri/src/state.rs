@@ -3,17 +3,24 @@ use std::sync::{Arc, Mutex};
 
 use m6809_core::{Emulator, StepResult};
 
+/// CoCo/Dragon NTSC E-clock — used for real-time pacing when AY is off.
+pub const DEFAULT_E_CLOCK_HZ: u32 = 894_886;
+
 #[derive(Clone)]
 pub struct RunSpeed {
-    pub steps_per_tick: u32,
+    /// Emulation rate vs. real hardware (1.0 = one E-clock second per wall second).
+    pub rate: f64,
     pub frame_ms: u64,
+    /// Safety cap on instructions per UI frame (prevents infinite loops at Max).
+    pub max_steps: u32,
 }
 
 impl Default for RunSpeed {
     fn default() -> Self {
         Self {
-            steps_per_tick: 500,
+            rate: 1.0,
             frame_ms: 50,
+            max_steps: 250_000,
         }
     }
 }

@@ -19,29 +19,58 @@ impl Emulator {
         }
     }
 
+    /// Hardware RESET: resets the attached devices, then the CPU.
     pub fn reset(&mut self) {
+        if let Some(io) = &mut self.memory.io {
+            io.reset();
+        }
         self.cpu.reset(&self.memory);
+        self.sample_interrupt_lines();
     }
 
+    /// Execute one instruction (or one SYNC/CWAI wait quantum, or one interrupt
+    /// entry), advance the devices by the same number of cycles and re-sample
+    /// the level-sensitive /IRQ and /FIRQ lines.
     pub fn step(&mut self) -> StepResult {
         let result = self.cpu.step(&mut self.memory);
         if let Some(io) = &mut self.memory.io {
             io.tick(result.cycles);
-            if io.poll_irq() {
-                self.trigger_irq();
-            }
         }
+        self.sample_interrupt_lines();
         result
     }
 
+    fn sample_interrupt_lines(&mut self) {
+        let (irq, firq) = match &mut self.memory.io {
+            Some(io) => (io.poll_irq(), io.poll_firq()),
+            None => (false, false),
+        };
+        self.cpu.irq_line = irq;
+        self.cpu.firq_line = firq;
+    }
+
+    /// Effective E clock of the attached machine (SAM speed-up aware).
+    pub fn cpu_clock_hz(&self) -> Option<u32> {
+        self.memory.io.as_ref().and_then(|io| io.cpu_clock_hz())
+    }
+
+    /// Run until `max_cycles` have elapsed or a breakpoint/watchpoint/illegal
+    /// opcode stops execution. SYNC/CWAI waits keep time running.
     pub fn run(&mut self, max_cycles: u64) -> u64 {
         let start = self.cpu.total_cycles;
-        while self.cpu.total_cycles - start < max_cycles && !self.cpu.halted {
+        while self.cpu.total_cycles - start < max_cycles {
             let result = self.step();
             if matches!(
                 result.trap,
-                Some(Trap::Halted) | Some(Trap::Breakpoint) | Some(Trap::Watchpoint)
+                Some(Trap::Halted)
+                    | Some(Trap::Breakpoint)
+                    | Some(Trap::Watchpoint)
+                    | Some(Trap::IllegalOpcode)
+                    | Some(Trap::DivideByZero)
             ) {
+                break;
+            }
+            if result.cycles == 0 {
                 break;
             }
         }
@@ -52,10 +81,14 @@ impl Emulator {
         self.memory.load_binary(offset, data)
     }
 
+    /// Load `data` into RAM at `offset` and reset the CPU so it starts at `reset_pc`.
+    /// The vector is also written for bare-metal RAM; on machines whose vectors
+    /// are ROM the entry point is applied directly.
     pub fn load_and_reset(&mut self, offset: u16, data: &[u8], reset_pc: u16) -> Result<(), String> {
         self.memory.load_binary(offset, data)?;
         self.memory.write16(0xFFFE, reset_pc);
         self.cpu.reset(&self.memory);
+        self.cpu.pc = reset_pc;
         Ok(())
     }
 
@@ -71,30 +104,29 @@ impl Emulator {
         self.cpu.breakpoints.remove(&addr);
     }
 
+    /// One-shot IRQ request (debugger button). SYNC/CWAI wake-up is decided by the CPU.
     pub fn trigger_irq(&mut self) {
         self.cpu.irq_pending = true;
-        self.cpu.halted = false;
-        self.cpu.sync_waiting = false;
     }
 
+    /// One-shot FIRQ request (debugger button).
     pub fn trigger_firq(&mut self) {
         self.cpu.firq_pending = true;
-        self.cpu.halted = false;
-        self.cpu.sync_waiting = false;
     }
 
+    /// NMI edge; ignored until the first write to S has armed NMI.
     pub fn trigger_nmi(&mut self) {
         if self.cpu.lds_encountered {
             self.cpu.nmi_pending = true;
-            self.cpu.halted = false;
-            self.cpu.sync_waiting = false;
         }
     }
 
+    /// Switch CPU type. A real HD6309 always starts in emulation mode (MD=0);
+    /// native mode is entered by software via LDMD.
     pub fn set_variant(&mut self, variant: CpuVariant) {
         self.cpu.variant = variant;
-        if variant == CpuVariant::Hd6309 {
-            self.cpu.mode_reg |= 0x01;
+        if variant == CpuVariant::Mc6809 {
+            self.cpu.mode_reg = 0;
         }
     }
 

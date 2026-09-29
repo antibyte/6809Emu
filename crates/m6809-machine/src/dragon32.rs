@@ -1,235 +1,223 @@
-//! Dragon 32 board: 6821 PIA, SAM, keyboard, VSYNC IRQ, Microsoft BASIC ROM.
+//! Dragon 32 board: the CoCo board core (`coco2.rs`) with Dragon wiring.
+//!
+//! Differences from the CoCo 2:
+//! - PAL timing: 14.218 MHz crystal (E = 888,625 Hz), 312 lines per field
+//!   (17,784 E cycles, 49.97 Hz); FS is low for 57 lines.
+//! - Keyboard rows 0-5 are wired rotated (`dragon_row = (coco_row + 2) % 6`).
+//! - One 16K Microsoft BASIC ROM at `$8000-$BFFF` (vectors from `$BFE0`).
+//! - 32K of RAM built from 32K × 1 chips (4532, the good half of a 4164):
+//!   PIA1 PB2 is tied low, so BASIC selects the SAM's 64K mode (M1), but the
+//!   chips do not decode A15. Map type 1 (`TY`) therefore makes
+//!   `$8000-$FEFF` a mirror of `$0000-$7EFF`, and P1 has no visible effect
+//!   (as XRoar's 32K × 1 RAM organisation).
+//! - PIA1 PA1 is the printer strobe, PB0 printer BUSY, CA1 printer ACK
+//!   (handled by the peripherals); CB1 is CART* as on the CoCo.
 
 use std::cell::RefCell;
 
+use crate::basic_rom;
 use crate::board_pia::BoardPia;
-use crate::keyboard::KeyboardMatrix;
-use crate::sam::Sam;
-use m6809_core::{IoRegisterView, IoWriteResult, MemoryIo};
+use crate::coco2::{board_machine_impl, BoardCore, BoardSpec};
+use crate::keyboard::KeyboardLayout;
+use crate::peripherals::BoardKind;
 use serde::{Deserialize, Serialize};
 
-const CYCLES_PER_FRAME: u32 = 14_940;
+/// PAL E clock: 14.218 MHz / 16.
+pub const CPU_CLOCK_HZ: u32 = 888_625;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DragonInner {
-    pia0: BoardPia,
-    pia1: BoardPia,
-    sam: Sam,
-    keyboard: KeyboardMatrix,
-    /// Latched VDG mode bits (PIA1 port B high nibble), for video decode.
-    vdg_mode: u8,
-    cycle_acc: u32,
-    irq_pending: bool,
+/// Dragon 32: 32K RAM (32K × 1), PAL.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DragonSpec;
+
+impl BoardSpec for DragonSpec {
+    const KIND_ID: &'static str = "dragon32";
+    const PERIPHERALS: BoardKind = BoardKind::Dragon32;
+    const LAYOUT: KeyboardLayout = KeyboardLayout::Dragon;
+    const BASE_CLOCK_HZ: u32 = CPU_CLOCK_HZ;
+    const LINES_PER_FIELD: u32 = 312;
+    const FS_HIGH_LINES: u32 = 255;
+    const RAM_MASK: u16 = 0x7FFF;
+
+    fn rom_byte(addr: u16) -> u8 {
+        basic_rom::dragon_rom_byte(addr)
+    }
+
+    /// PB2 is tied low on the Dragon 32 (32K × 1 RAM).
+    fn ram_size_sense(_pia0: &BoardPia) -> bool {
+        false
+    }
 }
 
+/// Dragon Data Dragon 32 (32K, PAL, Microsoft BASIC).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dragon32Machine {
-    inner: RefCell<DragonInner>,
+    inner: RefCell<BoardCore<DragonSpec>>,
 }
 
-impl Default for Dragon32Machine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+board_machine_impl!(Dragon32Machine, DragonSpec);
 
-impl Dragon32Machine {
-    pub fn new() -> Self {
-        Self {
-            inner: RefCell::new(DragonInner {
-                pia0: BoardPia::new(),
-                pia1: BoardPia::new(),
-                // Real Dragon SAM is at $FFC0; text screen default $0400.
-                sam: Sam::with_coco_default(),
-                keyboard: KeyboardMatrix::default(),
-                vdg_mode: 0x00,
-                cycle_acc: 0,
-                irq_pending: false,
-            }),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coco2::test_support::*;
+    use crate::vdg::VdgInputs;
+    use m6809_core::{IoWriteResult, MemoryIo};
+
+    type M = Dragon32Machine;
+
+    impl TestBoard for Dragon32Machine {
+        const FIELD_CYCLES: u64 = 312 * 57;
+
+        fn fresh() -> Self {
+            Dragon32Machine::new()
+        }
+
+        fn key(&mut self, code: &str, key: Option<&str>, down: bool) {
+            self.host_key_event(code, key, down);
+        }
+
+        fn video(&self) -> VdgInputs {
+            self.vdg_inputs()
+        }
+
+        fn fields(&self) -> u64 {
+            self.inner.borrow().field_count()
+        }
+
+        fn lines(&self) -> u64 {
+            self.inner.borrow().line_count()
+        }
+
+        fn sam_bits(&self) -> u16 {
+            self.inner.borrow().sam().bits()
         }
     }
 
-    /// PIA0 mirrored across `$FF00–$FF1F` (same partial decode as CoCo).
-    fn is_pia0(addr: u16) -> bool {
-        (0xFF00..=0xFF1F).contains(&addr)
+    #[test]
+    fn rom_vectors_and_io_map() {
+        let mut m = Dragon32Machine::new();
+        let mut ram = [0u8; 0x10000];
+        assert_eq!(m.kind_id(), "dragon32");
+        assert_eq!(m.read(0xFFFE, &ram), Some(0xB3));
+        assert_eq!(m.read(0xFFFF, &ram), Some(0xB4));
+        assert_eq!(m.read(0x8000, &ram), Some(basic_rom::DRAGON32_BASIC[0]));
+        assert_eq!(m.write(0x8000, 0, &mut ram), IoWriteResult::Ignored);
+        assert_eq!(m.write(0xFFFE, 0, &mut ram), IoWriteResult::Ignored);
+        assert_eq!(m.write(0xFF60, 1, &mut ram), IoWriteResult::Ignored);
+        assert_eq!(m.read(0xFF60, &ram), Some(0xFF));
+        assert_eq!(m.read(0x7FFF, &ram), None);
+        assert_eq!(Dragon32Machine::cpu_clock_hz(&m), 888_625);
     }
 
-    /// PIA1 mirrored across `$FF20–$FF3F`.
-    fn is_pia1(addr: u16) -> bool {
-        (0xFF20..=0xFF3F).contains(&addr)
+    #[test]
+    fn map_type_1_mirrors_the_32k_of_ram() {
+        let mut emu = emu_with::<M>();
+        emu.memory.write8(0x0123, 0x42);
+        emu.memory.write8(0xFFDF, 0); // TY=1
+        assert_eq!(emu.memory.read8(0x8123), 0x42, "A15 is not decoded");
+        emu.memory.write8(0x8124, 0x43);
+        assert_eq!(emu.memory.ram[0x0124], 0x43);
+        assert_eq!(emu.memory.ram[0x8124], 0x00);
+        emu.memory.write8(0xFFDE, 0);
+        assert_eq!(emu.memory.read8(0x8123), basic_rom::DRAGON32_BASIC[0x123]);
+        // P1 in 64K mode: page 1 is page 0 again.
+        emu.memory.write8(0xFFDD, 0);
+        emu.memory.write8(0xFFD5, 0);
+        assert_eq!(emu.memory.read8(0x0123), 0x42);
     }
 
-    fn is_rom(addr: u16) -> bool {
-        (0x8000..=0xFEFF).contains(&addr)
+    #[test]
+    fn pal_field_and_line_rates() {
+        let mut emu = emu_with::<M>();
+        idle_loop(&mut emu);
+        let (l0, f0) = (board::<M>(&emu).lines(), board::<M>(&emu).fields());
+        run_cycles(&mut emu, 888_625);
+        let lines = board::<M>(&emu).lines() - l0;
+        let fields = board::<M>(&emu).fields() - f0;
+        assert!((15_500..=15_700).contains(&lines), "HS per second {lines}");
+        assert!((49..=51).contains(&fields), "FS per second {fields}");
+        assert_eq!(<DragonSpec as BoardSpec>::field_ticks(), 17_784 * 2);
     }
 
-    fn sync_keyboard(inner: &mut DragonInner) {
-        let cols = inner.pia0.output_b();
-        let rows = inner.keyboard.read_rows(cols);
-        inner.pia0.set_ira(rows);
-        inner.pia0.set_irb(0xFF);
+    #[test]
+    fn fs_irq_handler_runs_once_per_field_50_hz() {
+        let mut emu = emu_with::<M>();
+        load_irq_counter(&mut emu, true);
+        run_cycles(&mut emu, 2_000);
+        let f0 = board::<M>(&emu).fields();
+        let c0 = emu.memory.read16(0x0300);
+        run_cycles(&mut emu, 888_625);
+        let count = emu.memory.read16(0x0300) - c0;
+        let fields = board::<M>(&emu).fields() - f0;
+        assert!((49..=51).contains(&count), "IRQs per second {count}");
+        assert!(u64::from(count).abs_diff(fields) <= 1, "one IRQ per field ({count} vs {fields})");
     }
 
-    pub fn host_key(&mut self, code: &str, down: bool) {
-        let mut inner = self.inner.borrow_mut();
-        inner.keyboard.host_key(code, down);
-        Self::sync_keyboard(&mut inner);
+    #[test]
+    fn dragon_basic_boots_with_32k() {
+        let emu = boot_basic::<M>();
+        let screen = screen_text::<M>(&emu);
+        assert!(screen.contains("OK"), "{screen}");
+        assert_eq!(emu.memory.read16(0x0074), 0x7FFE, "top of RAM");
+        let sam = crate::sam::Sam::from_bits(board::<M>(&emu).sam_bits());
+        assert_eq!(sam.f_bits(), 2, "text screen at $0400");
     }
 
-    pub fn clear_keys(&mut self) {
-        let mut inner = self.inner.borrow_mut();
-        inner.keyboard.clear();
-        Self::sync_keyboard(&mut inner);
+    #[test]
+    fn dragon_timer_counts_50_per_second() {
+        let mut emu = boot_basic::<M>();
+        let t0 = emu.memory.read16(0x0112);
+        run_cycles(&mut emu, 888_625);
+        let dt = emu.memory.read16(0x0112).wrapping_sub(t0);
+        assert!((49..=51).contains(&dt), "TIMER advanced by {dt}");
     }
 
-    pub fn board_tick(&mut self, cycles: u32) {
-        let mut inner = self.inner.borrow_mut();
-        inner.cycle_acc = inner.cycle_acc.saturating_add(cycles);
-        while inner.cycle_acc >= CYCLES_PER_FRAME {
-            inner.cycle_acc -= CYCLES_PER_FRAME;
-            if inner.pia0.set_cb1(false) {
-                inner.irq_pending = true;
-            }
-            if inner.pia0.set_cb1(true) {
-                inner.irq_pending = true;
-            }
-            let _ = inner.pia0.set_ca1(false);
-            let _ = inner.pia0.set_ca1(true);
+    #[test]
+    fn dragon_matrix_typing() {
+        let mut emu = boot_basic::<M>();
+        // Positional codes, no typed characters: the Dragon rows must be used.
+        for code in ["KeyA", "KeyB", "KeyP", "Digit1", "Digit9", "KeyX", "Digit0", "Slash"] {
+            tap::<M>(&mut emu, code, None);
         }
-        if inner.pia0.irq_asserted() || inner.pia1.irq_asserted() {
-            inner.irq_pending = true;
-        }
+        let line = screen_line_with::<M>(&emu, "ABP");
+        assert!(line.starts_with("ABP19X0/"), "screen line {line:?}");
     }
 
-    pub fn board_poll_irq(&mut self) -> bool {
-        let mut inner = self.inner.borrow_mut();
-        let pending =
-            inner.irq_pending || inner.pia0.irq_asserted() || inner.pia1.irq_asserted();
-        inner.irq_pending = false;
-        pending
-    }
-}
-
-impl MemoryIo for Dragon32Machine {
-    fn kind_id(&self) -> &str {
-        "dragon32"
+    #[test]
+    fn dragon_character_mapping() {
+        let mut emu = boot_basic::<M>();
+        let text = "AZ09!\"#$%&'()*+,-./:;<=>?@^[]\\_";
+        type_text::<M>(&mut emu, text);
+        let screen = screen_text::<M>(&emu);
+        let line = screen_line_with::<M>(&emu, "AZ09");
+        assert!(line.starts_with(text), "screen line {line:?}\n{screen}");
     }
 
-    fn read(&self, addr: u16, ram: &[u8; 0x10000]) -> Option<u8> {
-        let mut inner = self.inner.borrow_mut();
-        if Self::is_pia0(addr) {
-            Self::sync_keyboard(&mut inner);
-            return Some(inner.pia0.read((addr & 3) as u8));
-        }
-        if Self::is_pia1(addr) {
-            return Some(inner.pia1.read((addr & 3) as u8));
-        }
-        if inner.sam.is_mapped(addr) {
-            return Some(inner.sam.read(addr));
-        }
-        if Self::is_rom(addr) {
-            return Some(ram[addr as usize]);
-        }
-        None
+    #[test]
+    fn vdg_inputs_follow_pia1_port_b() {
+        let mut m = Dragon32Machine::new();
+        let mut ram = [0u8; 0x10000];
+        m.write(0xFF22, 0xF8, &mut ram); // DDRB (CRB bit 2 = 0 after reset)
+        m.write(0xFF23, 0x04, &mut ram);
+        m.write(0xFF22, 0x80, &mut ram);
+        assert_eq!(m.vdg_inputs().vdg_ctrl, 0x80);
+        m.write(0xFF22, 0x08, &mut ram);
+        assert_eq!(m.vdg_inputs().vdg_ctrl, 0x08);
     }
 
-    fn write(&mut self, addr: u16, value: u8, ram: &mut [u8; 0x10000]) -> IoWriteResult {
-        let _ = ram;
-        let mut inner = self.inner.borrow_mut();
-        if Self::is_pia0(addr) {
-            inner.pia0.write((addr & 3) as u8, value);
-            Self::sync_keyboard(&mut inner);
-            return IoWriteResult::Consumed;
-        }
-        if Self::is_pia1(addr) {
-            inner.pia1.write((addr & 3) as u8, value);
-            if (addr & 3) == 2 {
-                // VDG mode on high nibble of PIA1 port B.
-                inner.vdg_mode = value;
-            }
-            return IoWriteResult::Consumed;
-        }
-        if inner.sam.is_mapped(addr) {
-            inner.sam.write(addr);
-            return IoWriteResult::Consumed;
-        }
-        if Self::is_rom(addr) {
-            return IoWriteResult::Ignored;
-        }
-        IoWriteResult::PassThrough
-    }
-
-    fn clone_box(&self) -> Box<dyn MemoryIo> {
-        Box::new(self.clone())
-    }
-
-    fn snapshot(&self) -> serde_json::Value {
-        serde_json::to_value(self).unwrap_or_default()
-    }
-
-    fn restore(&mut self, snapshot: &serde_json::Value) {
-        if let Ok(state) = serde_json::from_value(snapshot.clone()) {
-            *self = state;
-        }
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
-    fn io_registers(&self) -> Vec<IoRegisterView> {
-        let inner = self.inner.borrow();
-        vec![
-            IoRegisterView {
-                address: 0xFF00,
-                name: "PIA0 ORA/IRA (Kbd Rows)".into(),
-                value: {
-                    let cols = inner.pia0.output_b();
-                    let rows = inner.keyboard.read_rows(cols);
-                    if inner.pia0.cra & 0x04 == 0 {
-                        inner.pia0.ddra
-                    } else {
-                        (inner.pia0.ora & inner.pia0.ddra) | (rows & !inner.pia0.ddra)
-                    }
-                },
-            },
-            IoRegisterView {
-                address: 0xFF01,
-                name: "PIA0 CRA".into(),
-                value: inner.pia0.cra,
-            },
-            IoRegisterView {
-                address: 0xFF02,
-                name: "PIA0 ORB (Kbd Cols)".into(),
-                value: inner.pia0.orb,
-            },
-            IoRegisterView {
-                address: 0xFF03,
-                name: "PIA0 CRB".into(),
-                value: inner.pia0.crb,
-            },
-            IoRegisterView {
-                address: 0xFF22,
-                name: "PIA1 ORB (VDG)".into(),
-                value: inner.vdg_mode,
-            },
-            IoRegisterView {
-                address: 0xFFC0,
-                name: "SAM V0".into(),
-                value: (inner.sam.bits() & 0x01) as u8,
-            },
-        ]
-    }
-
-    fn tick(&mut self, cycles: u32) {
-        self.board_tick(cycles);
-    }
-
-    fn poll_irq(&mut self) -> bool {
-        self.board_poll_irq()
+    #[test]
+    fn io_registers_include_both_pias_and_the_sam() {
+        let mut m = Dragon32Machine::new();
+        let mut ram = [0u8; 0x10000];
+        m.write(0xFF22, 0xF8, &mut ram);
+        m.write(0xFF23, 0x04, &mut ram);
+        m.write(0xFF22, 0x58, &mut ram);
+        m.write(0xFFC9, 0, &mut ram);
+        let regs = m.io_registers();
+        let find = |a: u16| regs.iter().find(|r| r.address == a).expect("reg").value;
+        assert_eq!(find(0xFF22), 0x58);
+        assert_eq!(find(0xFF23), 0x04);
+        assert_eq!(find(0xFF20), 0xFF);
+        assert_eq!(find(0xFFC6), 2);
     }
 }

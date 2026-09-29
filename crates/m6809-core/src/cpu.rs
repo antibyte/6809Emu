@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::addressing::{indexed_addr, AddrMode};
+use crate::addressing::{format_index_operand_at, indexed_addr, AddrMode};
 use crate::alu::{
     add16, add8, asl8, asr8, cmp16, cmp8, lsr8, rol8, ror8, sub16, sub8,
 };
@@ -42,10 +42,20 @@ pub struct Cpu {
     pub dp: u8,
     pub cc: Flags,
     pub total_cycles: u64,
+    /// Legacy flag, no longer set by SYNC/CWAI (see `sync_waiting` / `cwai_waiting`).
     pub halted: bool,
+    /// One-shot IRQ request from the debugger UI; cleared when the IRQ is taken.
     pub irq_pending: bool,
+    /// One-shot FIRQ request from the debugger UI; cleared when the FIRQ is taken.
     pub firq_pending: bool,
+    /// Edge-triggered NMI latch.
     pub nmi_pending: bool,
+    /// Level of the /IRQ line driven by emulated hardware (re-sampled every step).
+    #[serde(default)]
+    pub irq_line: bool,
+    /// Level of the /FIRQ line driven by emulated hardware (re-sampled every step).
+    #[serde(default)]
+    pub firq_line: bool,
     pub breakpoints: HashSet<u16>,
     pub variant: CpuVariant,
     pub w: u16,
@@ -93,7 +103,51 @@ pub(crate) struct StepCtx {
     pub mnemonic: String,
     pub operands: String,
     pub trap: Option<Trap>,
+    /// Indexed-mode postbyte of the executed instruction (for HD6309 native timing).
+    pub index_postbyte: Option<u8>,
+    /// HD6309: an illegal indexed postbyte was fetched; holds the PC after it.
+    /// The instruction is aborted (registers restored, writes dropped) and trapped.
+    pub illegal_postbyte_pc: Option<u16>,
 }
+
+impl StepCtx {
+    pub(crate) fn new(opcode: u8) -> Self {
+        Self {
+            cycles: 0,
+            bytes: vec![opcode],
+            mnemonic: String::new(),
+            operands: String::new(),
+            trap: None,
+            index_postbyte: None,
+            illegal_postbyte_pc: None,
+        }
+    }
+}
+
+/// Register file saved before an HD6309 instruction, restored if an illegal
+/// indexed postbyte aborts it.
+#[derive(Clone, Copy)]
+struct RegisterSnapshot {
+    a: u8,
+    b: u8,
+    x: u16,
+    y: u16,
+    u: u16,
+    s: u16,
+    dp: u8,
+    cc: Flags,
+    w: u16,
+    v: u16,
+    mode_reg: u8,
+    lds_encountered: bool,
+}
+
+/// E-clock cycles that elapse per `step()` while SYNC/CWAI waits for an interrupt.
+pub const WAIT_QUANTUM_CYCLES: u32 = 4;
+/// CWAI: opcode, mask, dummy cycle and the 12-byte stack push (MAME m6809.ops).
+const CWAI_STACK_CYCLES: u32 = 16;
+/// CWAI: vector fetch once an unmasked interrupt arrives (16 + 4 = 20, datasheet).
+const CWAI_VECTOR_CYCLES: u32 = 4;
 
 impl Cpu {
     pub fn new() -> Self {
@@ -112,6 +166,8 @@ impl Cpu {
             irq_pending: false,
             firq_pending: false,
             nmi_pending: false,
+            irq_line: false,
+            firq_line: false,
             breakpoints: HashSet::new(),
             variant: CpuVariant::Mc6809,
             w: 0,
@@ -138,10 +194,12 @@ impl Cpu {
         self.irq_pending = false;
         self.firq_pending = false;
         self.nmi_pending = false;
+        self.irq_line = false;
+        self.firq_line = false;
         self.pc = mem.read16(0xFFFE);
         self.total_cycles = 0;
-        self.w = 0;
-        self.v = 0;
+        // HD6309 (MAME device_reset): MD is cleared (emulation mode, FIRQ
+        // fast); V survives a reset and W is not touched either.
         self.mode_reg = 0;
         self.free_run = false;
         self.sync_waiting = false;
@@ -154,22 +212,34 @@ impl Cpu {
         self.nmi_pending && self.lds_encountered
     }
 
+    /// /IRQ asserted: level from hardware or a one-shot request from the UI.
+    fn irq_asserted(&self) -> bool {
+        self.irq_pending || self.irq_line
+    }
+
+    /// /FIRQ asserted: level from hardware or a one-shot request from the UI.
+    fn firq_asserted(&self) -> bool {
+        self.firq_pending || self.firq_line
+    }
+
     fn any_interrupt_line(&self) -> bool {
-        self.nmi_is_serviceable() || self.firq_pending || self.irq_pending
+        self.nmi_is_serviceable() || self.firq_asserted() || self.irq_asserted()
     }
 
     fn serviceable_interrupt_vector(&self) -> Option<u16> {
         if self.nmi_is_serviceable() {
             Some(0xFFFC)
-        } else if self.firq_pending && !self.cc.contains(Flags::F) {
+        } else if self.firq_asserted() && !self.cc.contains(Flags::F) {
             Some(0xFFF6)
-        } else if self.irq_pending && !self.cc.contains(Flags::I) {
+        } else if self.irq_asserted() && !self.cc.contains(Flags::I) {
             Some(0xFFF8)
         } else {
             None
         }
     }
 
+    /// Consume the one-shot request for a taken interrupt. Hardware lines stay
+    /// as the device drives them (level-sensitive IRQ/FIRQ).
     fn clear_pending_for_vector(&mut self, vector: u16) {
         match vector {
             0xFFFC => self.nmi_pending = false,
@@ -179,24 +249,50 @@ impl Cpu {
         }
     }
 
+    /// Masks set when an interrupt is taken: IRQ sets I only; FIRQ and NMI set I and F.
+    fn entry_mask(vector: u16) -> Flags {
+        if vector == 0xFFF8 {
+            Flags::I
+        } else {
+            Flags::I | Flags::F
+        }
+    }
+
+    /// True while SYNC or CWAI waits for an interrupt.
+    pub fn is_waiting(&self) -> bool {
+        self.sync_waiting || self.cwai_waiting
+    }
+
+    /// One idle quantum of a SYNC/CWAI wait: time passes, no instruction runs.
+    fn wait_step(&mut self, name: &str) -> StepResult {
+        self.total_cycles += WAIT_QUANTUM_CYCLES as u64;
+        StepResult {
+            cycles: WAIT_QUANTUM_CYCLES,
+            pc_before: self.pc,
+            pc_after: self.pc,
+            opcode: 0,
+            bytes: vec![],
+            mnemonic: name.to_string(),
+            operands: "(wait)".into(),
+            trap: None,
+        }
+    }
+
+    /// CWAI already stacked the machine state; an unmasked interrupt only vectors.
     fn finish_cwai(&mut self, mem: &Memory, vector: u16, pc_before: u16) -> StepResult {
         self.cwai_waiting = false;
-        self.halted = false;
         self.clear_pending_for_vector(vector);
-        self.cc.insert(Flags::I);
-        if vector != 0xFFF8 {
-            self.cc.insert(Flags::F);
-        }
+        self.cc.insert(Self::entry_mask(vector));
         self.pc = mem.read16(vector);
-        self.total_cycles += 19;
+        self.total_cycles += CWAI_VECTOR_CYCLES as u64;
         StepResult {
-            cycles: 19,
+            cycles: CWAI_VECTOR_CYCLES,
             pc_before,
             pc_after: self.pc,
-            opcode: 0x3C,
-            bytes: vec![0x3C],
+            opcode: 0,
+            bytes: vec![],
             mnemonic: "CWAI".into(),
-            operands: String::new(),
+            operands: format!("${vector:04X}"),
             trap: None,
         }
     }
@@ -216,14 +312,15 @@ impl Cpu {
             flags: FlagState::from(self.cc),
             total_cycles: self.total_cycles,
             halted: self.halted,
-            irq_pending: self.irq_pending,
-            firq_pending: self.firq_pending,
+            irq_pending: self.irq_asserted(),
+            firq_pending: self.firq_asserted(),
             nmi_pending: self.nmi_pending,
             lds_encountered: self.lds_encountered,
             variant: self.variant,
             w: self.w,
             v: self.v,
             mode_reg: self.mode_reg,
+            waiting: self.is_waiting(),
         }
     }
 
@@ -274,15 +371,16 @@ impl Cpu {
                 Ok(())
             }
             "MD" if self.is_hd6309() => {
-                self.mode_reg = value as u8;
+                // Bits 2-5 do not exist.
+                self.mode_reg = value as u8 & 0xC3;
                 Ok(())
             }
             "E" if self.is_hd6309() => {
-                self.w = (self.w & 0x00FF) | (value << 8);
+                self.w = (self.w & 0x00FF) | ((value & 0x00FF) << 8);
                 Ok(())
             }
             "F" if self.is_hd6309() => {
-                self.w = (self.w & 0xFF00) | value;
+                self.w = (self.w & 0xFF00) | (value & 0x00FF);
                 Ok(())
             }
             _ => Err(format!("Unknown register: {register}")),
@@ -368,38 +466,39 @@ impl Cpu {
     }
 
     pub fn step(&mut self, mem: &mut Memory) -> StepResult {
-        if self.tfm_pending.is_some() {
-            return self.run_tfm_chunk_step(mem);
+        // HD6309 TFM in progress. Registers (src, dst, W) reflect the progress of
+        // every chunk and PC still addresses the TFM instruction, so an interrupt
+        // between chunks just drops the continuation: the stacked PC is the TFM
+        // and RTI restarts it with the remaining count (MAME: PC -= 3).
+        if let Some(tfm_pc) = self.tfm_pending.as_ref().map(|t| t.pc_before) {
+            if self.serviceable_interrupt_vector().is_none() {
+                return self.run_tfm_chunk_step(mem);
+            }
+            self.tfm_pending = None;
+            self.pc = tfm_pc;
         }
 
+        // SYNC: wait for any asserted interrupt line; the masks do not matter.
+        // A masked interrupt resumes with the next instruction.
+        if self.sync_waiting {
+            if !self.any_interrupt_line() {
+                return self.wait_step("SYNC");
+            }
+            self.sync_waiting = false;
+        }
+
+        // CWAI: the entire state is stacked; wait for an unmasked interrupt.
         if self.cwai_waiting {
             if let Some(vector) = self.serviceable_interrupt_vector() {
                 return self.finish_cwai(mem, vector, self.pc);
             }
-        }
-
-        if self.halted {
-            if self.sync_waiting && self.any_interrupt_line() {
-                self.sync_waiting = false;
-                self.halted = false;
-                return self.make_step_result(0, 0, vec![0x13], "SYNC", "", None);
-            }
-            if self.cwai_waiting {
-                if let Some(vector) = self.serviceable_interrupt_vector() {
-                    let pc_before = self.pc;
-                    return self.finish_cwai(mem, vector, pc_before);
-                }
-            }
-            return self.make_step_result(0, 0, vec![], "HALT", "", Some(Trap::Halted));
+            return self.wait_step("CWAI");
         }
 
         let pc_before = self.pc;
 
+        // HCF / free-run test mode: only RESET leaves it (interrupts are ignored).
         if self.free_run && self.is_mc6809() {
-            if let Some(trap) = self.service_interrupts(mem) {
-                self.free_run = false;
-                return trap;
-            }
             self.total_cycles += 1;
             let ctx = self.exec_freerun_step();
             return StepResult {
@@ -433,18 +532,29 @@ impl Cpu {
 
         let opcode = mem.read8(self.pc);
         self.pc = self.pc.wrapping_add(1);
-        let mut ctx = StepCtx {
-            cycles: 0,
-            bytes: vec![opcode],
-            mnemonic: String::new(),
-            operands: String::new(),
-            trap: None,
-        };
+        let mut ctx = StepCtx::new(opcode);
+        let saved = self.is_hd6309().then(|| self.save_registers());
 
         match opcode {
             0x10 => self.exec_page2(mem, &mut ctx),
             0x11 => self.exec_page3(mem, &mut ctx),
             _ => self.exec_page1(opcode, mem, &mut ctx),
+        }
+
+        if let Some(trap_pc) = ctx.illegal_postbyte_pc.take() {
+            // HD6309 illegal indexed postbyte: undo the aborted instruction and
+            // take the $FFF0 trap with PC just past the postbyte.
+            mem.set_write_inhibit(false);
+            if let Some(saved) = saved {
+                self.restore_registers(saved);
+            }
+            self.pc = trap_pc;
+            ctx.index_postbyte = None;
+            self.hd6309_illegal(mem, &mut ctx);
+        }
+
+        if self.is_native_6309() {
+            self.hd6309_native_cycles(&mut ctx);
         }
 
         self.total_cycles += ctx.cycles as u64;
@@ -467,6 +577,38 @@ impl Cpu {
             operands: ctx.operands,
             trap,
         }
+    }
+
+    fn save_registers(&self) -> RegisterSnapshot {
+        RegisterSnapshot {
+            a: self.a,
+            b: self.b,
+            x: self.x,
+            y: self.y,
+            u: self.u,
+            s: self.s,
+            dp: self.dp,
+            cc: self.cc,
+            w: self.w,
+            v: self.v,
+            mode_reg: self.mode_reg,
+            lds_encountered: self.lds_encountered,
+        }
+    }
+
+    fn restore_registers(&mut self, r: RegisterSnapshot) {
+        self.a = r.a;
+        self.b = r.b;
+        self.x = r.x;
+        self.y = r.y;
+        self.u = r.u;
+        self.s = r.s;
+        self.dp = r.dp;
+        self.cc = r.cc;
+        self.w = r.w;
+        self.v = r.v;
+        self.mode_reg = r.mode_reg;
+        self.lds_encountered = r.lds_encountered;
     }
 
     fn make_step_result(
@@ -498,53 +640,62 @@ impl Cpu {
         self.is_hd6309() && self.mode_reg & 0x02 != 0
     }
 
+    /// Stack the entire machine state with E set (IRQ, NMI, SWI*, CWAI, traps).
+    /// Leaves the I/F masks alone.
+    pub(crate) fn push_entire_state(&mut self, mem: &mut Memory) {
+        self.cc.insert(Flags::E);
+        self.push16(mem, self.pc);
+        self.push16(mem, self.u);
+        self.push16(mem, self.y);
+        self.push16(mem, self.x);
+        self.push8(mem, self.dp);
+        if self.is_native_6309() {
+            self.push8(mem, (self.w & 0xFF) as u8);
+            self.push8(mem, (self.w >> 8) as u8);
+        }
+        self.push8(mem, self.b);
+        self.push8(mem, self.a);
+        self.push8(mem, self.cc.bits());
+    }
+
+    /// Stack PC and CC with E cleared first (fast FIRQ). Leaves the I/F masks alone.
+    fn push_fast_state(&mut self, mem: &mut Memory) {
+        self.cc.remove(Flags::E);
+        self.push16(mem, self.pc);
+        self.push8(mem, self.cc.bits());
+    }
+
+    /// Stack a frame and mask both I and F (NMI-style entry, HD6309 traps).
     pub(crate) fn push_interrupt_frame(&mut self, mem: &mut Memory, save_all: bool) {
         if save_all {
-            self.push16(mem, self.pc);
-            self.push16(mem, self.u);
-            self.push16(mem, self.y);
-            self.push16(mem, self.x);
-            self.push8(mem, self.dp);
-            if self.is_native_6309() {
-                self.push8(mem, (self.w & 0xFF) as u8);
-                self.push8(mem, (self.w >> 8) as u8);
-            }
-            self.push8(mem, self.b);
-            self.push8(mem, self.a);
-            self.cc.insert(Flags::E);
-            self.push8(mem, self.cc.bits());
-            self.cc.insert(Flags::I | Flags::F);
+            self.push_entire_state(mem);
         } else {
-            self.push16(mem, self.pc);
-            self.push8(mem, self.cc.bits());
-            self.cc.insert(Flags::I | Flags::F);
-            self.cc.remove(Flags::E);
+            self.push_fast_state(mem);
         }
+        self.cc.insert(Flags::I | Flags::F);
     }
 
     fn service_interrupts(&mut self, mem: &mut Memory) -> Option<StepResult> {
-        if self.nmi_is_serviceable() {
-            self.nmi_pending = false;
-            return Some(self.enter_interrupt(mem, 0xFFFC, true, "NMI"));
-        }
-        if self.firq_pending && !self.cc.contains(Flags::F) {
-            self.firq_pending = false;
-            let save_all = self.firq_full_save();
-            return Some(self.enter_interrupt(mem, 0xFFF6, save_all, "FIRQ"));
-        }
-        if self.irq_pending && !self.cc.contains(Flags::I) {
-            self.irq_pending = false;
-            return Some(self.enter_interrupt(mem, 0xFFF8, true, "IRQ"));
-        }
-        None
+        let vector = self.serviceable_interrupt_vector()?;
+        self.clear_pending_for_vector(vector);
+        let (save_all, name) = match vector {
+            0xFFFC => (true, "NMI"),
+            0xFFF6 => (self.firq_full_save(), "FIRQ"),
+            _ => (true, "IRQ"),
+        };
+        Some(self.enter_interrupt(mem, vector, save_all, name))
     }
 
+    /// HD6309 illegal-instruction / division-by-zero trap: set the MD error
+    /// bit, stack the entire state (W too in native mode) and vector through
+    /// $FFF0. I and F are left alone (MAME SOFTWARE_INTERRUPT, hoglet67). The
+    /// time is accounted for by the caller's `ctx.cycles`.
     pub(crate) fn enter_hw_trap(&mut self, mem: &mut Memory, error_bit: u8) {
         self.mode_reg |= error_bit;
+        // Read the vector first: a low S could overwrite it while stacking.
         let target = mem.read16(0xFFF0);
-        self.push_interrupt_frame(mem, true);
+        self.push_entire_state(mem);
         self.pc = target;
-        self.total_cycles += 19;
     }
 
     fn enter_interrupt(
@@ -557,11 +708,24 @@ impl Cpu {
         let pc_before = self.pc;
         // Read vector before pushing — a low S can overwrite vector addresses during push.
         let target = mem.read16(vector);
-        self.push_interrupt_frame(mem, save_all);
+        // Datasheet: IRQ/NMI (entire state) 19 cycles, fast FIRQ 10 cycles;
+        // HD6309 native mode stacks W as well (+2).
+        let cycles = if save_all {
+            self.push_entire_state(mem);
+            if self.is_native_6309() {
+                21
+            } else {
+                19
+            }
+        } else {
+            self.push_fast_state(mem);
+            10
+        };
+        self.cc.insert(Self::entry_mask(vector));
         self.pc = target;
-        self.total_cycles += 19;
+        self.total_cycles += cycles as u64;
         StepResult {
-            cycles: 19,
+            cycles,
             pc_before,
             pc_after: self.pc,
             opcode: 0,
@@ -577,23 +741,37 @@ impl Cpu {
         ctx.mnemonic = "NOP".into();
     }
 
+    /// SYNC: at least 4 cycles; without an asserted interrupt line the CPU then
+    /// idles in `wait_step` while emulated time keeps running.
     fn exec_sync(&mut self, ctx: &mut StepCtx) {
-        ctx.cycles = 2;
+        ctx.cycles = 4;
         ctx.mnemonic = "SYNC".into();
         if !self.any_interrupt_line() {
             self.sync_waiting = true;
-            self.halted = true;
-            ctx.trap = Some(Trap::Halted);
         }
     }
 
-    fn exec_swi(&mut self, mem: &mut Memory, ctx: &mut StepCtx, vector: u16, name: &str) {
-        ctx.cycles = 19;
+    /// SWI sets I and F; SWI2/SWI3 leave both masks unchanged (MC6809 datasheet).
+    /// Only an uninitialised vector ($0000/$FFFF) reports `Trap::Swi`, so programs
+    /// that end in a bare SWI still stop while real SWI handlers run through.
+    fn exec_swi(
+        &mut self,
+        mem: &mut Memory,
+        ctx: &mut StepCtx,
+        vector: u16,
+        name: &str,
+        masks: Flags,
+        cycles: u32,
+    ) {
+        ctx.cycles = cycles;
         ctx.mnemonic = name.into();
         let target = mem.read16(vector);
-        self.push_interrupt_frame(mem, true);
+        self.push_entire_state(mem);
+        self.cc.insert(masks);
         self.pc = target;
-        ctx.trap = Some(Trap::Swi);
+        if target == 0x0000 || target == 0xFFFF {
+            ctx.trap = Some(Trap::Swi);
+        }
     }
 
     fn exec_rti(&mut self, mem: &Memory, ctx: &mut StepCtx) {
@@ -625,33 +803,29 @@ impl Cpu {
     }
 
     fn exec_sex(&mut self, ctx: &mut StepCtx) {
-        ctx.cycles = 3;
+        ctx.cycles = 2;
         ctx.mnemonic = "SEX".into();
         self.a = if self.b & 0x80 != 0 { 0xFF } else { 0x00 };
         // N/Z from the 16-bit result in D (Motorola SEX).
         self.cc.set_nz16(self.get_reg16(Reg16::D));
     }
 
+    /// CWAI: AND the mask into CC, stack the entire state (E=1) *without* touching
+    /// I/F, then wait until an interrupt that the new masks allow arrives.
     fn exec_cwai(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
         let mask = self.fetch_imm8(mem, ctx);
-        ctx.cycles = 20;
+        ctx.cycles = CWAI_STACK_CYCLES;
         ctx.mnemonic = "CWAI".into();
         ctx.operands = format!("#${mask:02X}");
         self.cc = Flags::from_bits_retain(self.cc.bits() & mask);
+        self.push_entire_state(mem);
         if let Some(vector) = self.serviceable_interrupt_vector() {
-            let target = mem.read16(vector);
-            self.push_interrupt_frame(mem, true);
             self.clear_pending_for_vector(vector);
-            self.cc.insert(Flags::I);
-            if vector != 0xFFF8 {
-                self.cc.insert(Flags::F);
-            }
-            self.pc = target;
+            self.cc.insert(Self::entry_mask(vector));
+            self.pc = mem.read16(vector);
+            ctx.cycles += CWAI_VECTOR_CYCLES;
         } else {
-            self.push_interrupt_frame(mem, true);
             self.cwai_waiting = true;
-            self.halted = true;
-            ctx.trap = Some(Trap::Halted);
         }
     }
 
@@ -693,7 +867,6 @@ impl Cpu {
         }
         self.a = t as u8;
         self.cc.set_nz8(self.a);
-        self.cc.remove(Flags::H);
     }
 
     fn exec_abx(&mut self, ctx: &mut StepCtx) {
@@ -708,9 +881,9 @@ impl Cpu {
         let result = (self.a as u16).wrapping_mul(self.b as u16);
         self.a = (result >> 8) as u8;
         self.b = result as u8;
+        // Only Z and C are affected (C = bit 7 of B, for rounding); N/V/H unchanged.
         self.cc.set(Flags::C, self.b & 0x80 != 0);
-        self.cc.remove(Flags::V);
-        self.cc.set_nz16(result);
+        self.cc.set(Flags::Z, result == 0);
     }
 
     pub(crate) fn fetch_imm8(&mut self, mem: &Memory, ctx: &mut StepCtx) -> u8 {
@@ -739,10 +912,21 @@ impl Cpu {
         (full, format!("${full:04X}"))
     }
 
+    /// Fetch the indexed postbyte and any offset bytes (recorded in `ctx.bytes`),
+    /// resolve the effective address and format the operand.
     pub(crate) fn addr_indexed(&mut self, mem: &Memory, ctx: &mut StepCtx) -> (u16, u8, String) {
         let postbyte = self.fetch_imm8(mem, ctx);
+        if self.is_hd6309() && crate::addressing::is_illegal_hd6309_postbyte(postbyte) {
+            // Abort: the caller finishes against a harmless address (the postbyte
+            // itself) with writes dropped; Cpu::step then restores and traps.
+            ctx.illegal_postbyte_pc = Some(self.pc);
+            mem.set_write_inhibit(true);
+            return (self.pc.wrapping_sub(1), 0, "???".into());
+        }
+        ctx.index_postbyte = Some(postbyte);
         let ea = indexed_addr(self, mem, postbyte);
-        let op = format_indexed_operand(ea.index_reg, postbyte, &ctx.bytes);
+        ctx.bytes.extend_from_slice(&ea.bytes);
+        let op = format_index_operand_at(postbyte, &ea.bytes, Some(self.pc));
         (ea.addr, ea.extra_cycles, op)
     }
 
@@ -809,6 +993,9 @@ impl Cpu {
 
     fn exec_page1(&mut self, opcode: u8, mem: &mut Memory, ctx: &mut StepCtx) {
         if self.try_exec_page1_undoc(opcode, mem, ctx) {
+            return;
+        }
+        if self.try_hd6309_page1(opcode, mem, ctx) {
             return;
         }
         match opcode {
@@ -900,7 +1087,7 @@ impl Cpu {
             0x3B => self.exec_rti(mem, ctx),
             0x3C => self.exec_cwai(mem, ctx),
             0x3D => self.exec_mul(ctx),
-            0x3F => self.exec_swi(mem, ctx, 0xFFFA, "SWI"),
+            0x3F => self.exec_swi(mem, ctx, 0xFFFA, "SWI", Flags::I | Flags::F, 19),
 
             0x40 => self.op_reg_unary(ctx, "NEG", Reg8::A, 2, |cpu, v| cpu.op_neg8(v)),
             0x43 => self.op_reg_unary(ctx, "COM", Reg8::A, 2, |cpu, v| cpu.op_com8(v)),
@@ -949,7 +1136,7 @@ impl Cpu {
             0x7A => self.op_mem_unary(mem, ctx, "DEC", AddrMode::Extended, 7, |cpu, v| cpu.op_dec8(v)),
             0x7C => self.op_mem_unary(mem, ctx, "INC", AddrMode::Extended, 7, |cpu, v| cpu.op_inc8(v)),
             0x7D => self.op_mem_test(mem, ctx, "TST", AddrMode::Extended, 7),
-            0x7E => self.op_jmp(mem, ctx, "JMP", AddrMode::Extended, 3),
+            0x7E => self.op_jmp(mem, ctx, "JMP", AddrMode::Extended, 4),
             0x7F => self.op_mem_store(mem, ctx, "CLR", AddrMode::Extended, 7, |cpu| cpu.op_clr8()),
 
             0x80 => self.op_alu8_imm(mem, ctx, "SUBA", Reg8::A, |a, b, f| { sub8(a, b, false, f); a.wrapping_sub(b) }),
@@ -1107,7 +1294,11 @@ impl Cpu {
             return;
         }
         match opcode {
-            0x10 | 0x11 if self.is_mc6809() => self.exec_page2(mem, ctx),
+            // MC6809: repeated prefixes are skipped (one cycle each).
+            0x10 | 0x11 if self.is_mc6809() => {
+                self.exec_page2(mem, ctx);
+                ctx.cycles += 1;
+            }
             0x20 => self.op_lbranch16(mem, ctx, "LBRA", |_| true),
             0x21 => self.op_lbranch16(mem, ctx, "LBRN", |_| false),
             0x22 => self.op_lbranch16(mem, ctx, "LBHI", |c| !c.cc.contains(Flags::C) && !c.cc.contains(Flags::Z)),
@@ -1126,7 +1317,7 @@ impl Cpu {
             0x2F => self.op_lbranch16(mem, ctx, "LBLE", |c| c.cc.contains(Flags::Z) || c.cc.contains(Flags::N) != c.cc.contains(Flags::V)),
 
             0x3E if self.is_mc6809() => self.exec_xswi2(mem, ctx),
-            0x3F => self.exec_swi(mem, ctx, 0xFFF4, "SWI2"),
+            0x3F => self.exec_swi(mem, ctx, 0xFFF4, "SWI2", Flags::empty(), 20),
 
             0x8D => self.op_branch16(mem, ctx, false), // LBSR
 
@@ -1165,7 +1356,10 @@ impl Cpu {
                 if self.is_hd6309() {
                     self.op_illegal_page(mem, ctx, opcode, 2);
                 } else {
+                    // MC6809: an undefined page-2 opcode executes as the page-1
+                    // opcode; the prefix fetch costs one extra cycle.
                     self.exec_page1(opcode, mem, ctx);
+                    ctx.cycles += 1;
                 }
             }
         }
@@ -1177,9 +1371,12 @@ impl Cpu {
             return;
         }
         match opcode {
-            0x10 | 0x11 if self.is_mc6809() => self.exec_page3(mem, ctx),
+            0x10 | 0x11 if self.is_mc6809() => {
+                self.exec_page3(mem, ctx);
+                ctx.cycles += 1;
+            }
             0x3E if self.is_mc6809() => self.exec_xfirq(mem, ctx),
-            0x3F => self.exec_swi(mem, ctx, 0xFFF2, "SWI3"),
+            0x3F => self.exec_swi(mem, ctx, 0xFFF2, "SWI3", Flags::empty(), 20),
 
             0x83 => self.op_cmp16_imm(mem, ctx, "CMPU", Reg16::U),
             0x87 if self.is_mc6809() => self.op_xst8_imm(mem, ctx, Reg8::A),
@@ -1203,6 +1400,7 @@ impl Cpu {
                     self.op_illegal_page(mem, ctx, opcode, 3);
                 } else {
                     self.exec_page1(opcode, mem, ctx);
+                    ctx.cycles += 1;
                 }
             }
         }
@@ -1291,6 +1489,9 @@ impl Cpu {
         F: FnOnce(&mut Self) -> u8,
     {
         let (addr, extra, operand) = self.resolve_addr(mem, ctx, mode);
+        // CLR is a read-modify-write instruction on the 6809: the operand is read
+        // before it is written (clears e.g. PIA interrupt flags on I/O addresses).
+        let _ = mem.read8(addr);
         let value = value_fn(self);
         mem.write8(addr, value);
         ctx.cycles = base_cycles + extra as u32;
@@ -1855,12 +2056,11 @@ impl Cpu {
         F: FnOnce(&Cpu) -> bool,
     {
         let (target, operand) = self.addr_relative8(mem, ctx);
+        // 8-bit relative branches take 3 cycles whether taken or not.
         if cond(self) {
             self.pc = target;
-            ctx.cycles = 3;
-        } else {
-            ctx.cycles = 2;
         }
+        ctx.cycles = 3;
         ctx.mnemonic = name.into();
         ctx.operands = operand;
     }
@@ -2055,20 +2255,20 @@ impl Cpu {
         if dst_code == 4 {
             self.lds_encountered = true;
         }
-        ctx.cycles = if self.is_hd6309() { 5 } else { 6 };
+        // 6 cycles; 4 in HD6309 native mode (hd6309_native_cycles).
+        ctx.cycles = 6;
         ctx.mnemonic = "TFR".into();
-        ctx.operands = format!(
-            "{},{}",
-            tfr_reg_name(src_code),
-            tfr_reg_name(dst_code)
-        );
+        let name = if self.is_hd6309() { crate::hd6309::hd6309_reg_name } else { tfr_reg_name };
+        ctx.operands = format!("{},{}", name(src_code), name(dst_code));
     }
 
     fn op_exg(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
         let postbyte = self.fetch_imm8(mem, ctx);
         let src_code = postbyte >> 4;
         let dst_code = postbyte & 0x0F;
-        let (reg1, reg2) = if postbyte & 0x80 != 0 {
+        // HD6309 (MAME read_exgtfr_register): an 8-bit register always reads as
+        // $rrrr, so EXG X,A gives X=$AAAA. MC6809: see read_exg_reg_8first.
+        let (reg1, reg2) = if self.is_hd6309() || postbyte & 0x80 != 0 {
             (
                 self.read_tfr_reg(src_code),
                 self.read_tfr_reg(dst_code),
@@ -2085,13 +2285,11 @@ impl Cpu {
         if src_code == 4 || dst_code == 4 {
             self.lds_encountered = true;
         }
-        ctx.cycles = if self.is_hd6309() { 7 } else { 8 };
+        // 8 cycles; 5 in HD6309 native mode (hd6309_native_cycles).
+        ctx.cycles = 8;
         ctx.mnemonic = "EXG".into();
-        ctx.operands = format!(
-            "{},{}",
-            tfr_reg_name(src_code),
-            tfr_reg_name(dst_code)
-        );
+        let name = if self.is_hd6309() { crate::hd6309::hd6309_reg_name } else { tfr_reg_name };
+        ctx.operands = format!("{},{}", name(src_code), name(dst_code));
     }
 
     fn dup8(byte: u8) -> u16 {
@@ -2127,20 +2325,8 @@ impl Cpu {
         }
     }
 
+    /// MC6809 EXG whose first register is 16-bit (the HD6309 uses read_tfr_reg).
     fn read_exg_reg_8first(&self, code: u8) -> u16 {
-        if self.is_hd6309() {
-            return match code {
-                0x0..=0x7 => self.get_hd6309_reg16(code),
-                0x8 => 0xFF00 | u16::from(self.a),
-                0x9 => 0xFF00 | u16::from(self.b),
-                0xA => 0xFF00 | u16::from(self.cc.bits()),
-                0xB => 0xFF00 | u16::from(self.dp),
-                0xC | 0xD => 0,
-                0xE => 0xFF00 | u16::from((self.w >> 8) as u8),
-                0xF => 0xFF00 | u16::from(self.w as u8),
-                _ => 0xFFFF,
-            };
-        }
         match code {
             0x0 => self.get_reg16(Reg16::D),
             0x1 => self.x,
@@ -2165,8 +2351,8 @@ impl Cpu {
                 0xA => self.cc = Flags::from_byte(value as u8),
                 0xB => self.dp = (value >> 8) as u8,
                 0xC | 0xD => {}
-                0xE => self.w = (self.w & 0x00FF) | ((value >> 8) << 8),
-                0xF => self.w = (self.w & 0xFF00) | value,
+                0xE => self.w = (self.w & 0x00FF) | (value & 0xFF00),
+                0xF => self.w = (self.w & 0xFF00) | (value & 0x00FF),
                 _ => {}
             }
             return;
@@ -2187,27 +2373,24 @@ impl Cpu {
     }
 
     fn op_illegal(&mut self, mem: &mut Memory, ctx: &mut StepCtx) {
+        if self.is_hd6309() {
+            // $FFF0 trap, MD bit 6 (hd6309.rs)
+            self.hd6309_illegal(mem, ctx);
+            return;
+        }
         ctx.cycles = 1;
         ctx.mnemonic = "???".into();
-        if self.is_hd6309() {
-            self.enter_hw_trap(mem, 0x40);
-            ctx.cycles = 19;
-            ctx.mnemonic = "TRAP".into();
-            ctx.operands = "$FFF0".into();
-        }
         ctx.trap = Some(Trap::IllegalOpcode);
     }
 
     fn op_illegal_page(&mut self, mem: &mut Memory, ctx: &mut StepCtx, opcode: u8, page: u8) {
+        if self.is_hd6309() {
+            self.hd6309_illegal(mem, ctx);
+            return;
+        }
         ctx.cycles = 1;
         ctx.mnemonic = "???".into();
         ctx.operands = format!("page{page}:${opcode:02X}");
-        if self.is_hd6309() {
-            self.enter_hw_trap(mem, 0x40);
-            ctx.cycles = 19;
-            ctx.mnemonic = "TRAP".into();
-            ctx.operands = "$FFF0".into();
-        }
         ctx.trap = Some(Trap::IllegalOpcode);
     }
 }
@@ -2238,14 +2421,6 @@ fn tfr_reg_name(code: u8) -> &'static str {
         0xF => "F",
         _ => "?",
     }
-}
-
-fn format_indexed_operand(_index_reg: Option<char>, postbyte: u8, bytes: &[u8]) -> String {
-    // The extra bytes in `bytes` start at index 1 (index 0 is the opcode).
-    // The postbyte is at bytes[0] for indexed ops, but here we receive the
-    // already-fetched postbyte separately. Extra operand bytes follow.
-    let extra = if bytes.len() > 1 { &bytes[1..] } else { &[] };
-    crate::addressing::format_index_operand(postbyte, extra)
 }
 
 impl Default for Cpu {
@@ -2358,12 +2533,25 @@ mod tests {
     }
 
     #[test]
-    fn sync_halts_without_interrupt() {
+    fn sync_waits_without_interrupt_and_time_keeps_running() {
         let mut cpu = Cpu::new();
-        let mut mem = mem_with_program(0x0100, &[0x13]);
+        let mut mem = mem_with_program(0x0100, &[0x13, 0x12]);
         cpu.pc = 0x0100;
-        cpu.step(&mut mem);
-        assert!(cpu.halted);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.cycles, 4, "SYNC takes at least 4 cycles");
+        assert!(step.trap.is_none(), "waiting must not stop a run");
+        assert!(cpu.sync_waiting);
+        let before = cpu.total_cycles;
+        let wait = cpu.step(&mut mem);
+        assert_eq!(wait.cycles, WAIT_QUANTUM_CYCLES);
+        assert_eq!(cpu.total_cycles, before + WAIT_QUANTUM_CYCLES as u64);
+        assert_eq!(cpu.pc, 0x0101, "no instruction runs while waiting");
+        // A masked IRQ line ends SYNC; execution resumes with the next instruction.
+        cpu.cc.insert(Flags::I);
+        cpu.irq_line = true;
+        let next = cpu.step(&mut mem);
+        assert_eq!(next.mnemonic, "NOP");
+        assert!(!cpu.sync_waiting);
     }
 
     #[test]
@@ -2482,12 +2670,102 @@ mod tests {
         let mut cpu = Cpu::new();
         cpu.variant = CpuVariant::Hd6309;
         cpu.pc = 0x0100;
-        let mut mem = mem_with_program(0x0100, &[0x01]);
+        cpu.s = 0x0200;
+        cpu.cc = Flags::empty();
+        // $87 (the 6809's undocumented "STA #") does not exist on the 6309.
+        let mut mem = mem_with_program(0x0100, &[0x87]);
         mem.write16(0xFFF0, 0x0500);
         let step = cpu.step(&mut mem);
         assert_eq!(step.mnemonic, "TRAP");
+        assert_eq!(step.trap, Some(Trap::IllegalOpcode));
         assert_eq!(cpu.pc, 0x0500);
         assert_ne!(cpu.mode_reg & 0x40, 0);
+        // Entire state stacked (12 bytes, E set, return address after the
+        // opcode); I and F are left alone (MAME, hoglet67).
+        assert_eq!(cpu.s, 0x0200 - 12);
+        assert_eq!(mem.read16(0x0200 - 2), 0x0101);
+        assert!(!cpu.cc.intersects(Flags::I | Flags::F));
+        assert!(cpu.cc.contains(Flags::E));
+        // 20 cycles (21 with a $10/$11 prefix), counted exactly once.
+        assert_eq!(step.cycles, 20);
+        assert_eq!(cpu.total_cycles, 20);
+    }
+
+    #[test]
+    fn hd6309_illegal_trap_in_native_mode_stacks_w() {
+        let mut cpu = Cpu::new();
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.mode_reg = 0x01;
+        cpu.pc = 0x0100;
+        cpu.s = 0x0200;
+        cpu.w = 0xBEEF;
+        let mut mem = mem_with_program(0x0100, &[0x10, 0x87]);
+        mem.write16(0xFFF0, 0x0500);
+        let step = cpu.step(&mut mem);
+        assert_eq!(step.trap, Some(Trap::IllegalOpcode));
+        assert_eq!(cpu.s, 0x0200 - 14);
+        assert_eq!(mem.read16(0x0200 - 2), 0x0102);
+        assert_eq!(mem.read16(0x0200 - 11), 0xBEEF, "E:F stacked after DP");
+        assert_eq!(step.cycles, 23);
+        assert_eq!(cpu.total_cycles, 23);
+    }
+
+    #[test]
+    fn hd6309_tfr_exg_mask_and_duplicate_bytes() {
+        let mut cpu = Cpu::new();
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.pc = 0x0100;
+        cpu.a = 0x12;
+        cpu.w = 0x0000;
+        cpu.x = 0xABCD;
+        // TFR A,F ; TFR X,F ; EXG X,A ; TFR 0,D ; TFR E,Y
+        let mut mem = mem_with_program(
+            0x0100,
+            &[0x1F, 0x8F, 0x1F, 0x1F, 0x1E, 0x18, 0x1F, 0xC0, 0x1F, 0xE2],
+        );
+        let step = cpu.step(&mut mem);
+        assert_eq!(cpu.w, 0x0012, "TFR A,F writes only F");
+        assert_eq!(step.cycles, 6);
+        assert_eq!(step.operands, "A,F");
+        cpu.w = 0x5500;
+        cpu.step(&mut mem);
+        assert_eq!(cpu.w, 0x55CD, "TFR X,F takes the low byte, E untouched");
+        let step = cpu.step(&mut mem);
+        assert_eq!(cpu.x, 0x1212, "EXG X,A: A reads as $1212");
+        assert_eq!(cpu.a, 0xAB);
+        assert_eq!(step.cycles, 8);
+        cpu.a = 0x77;
+        cpu.b = 0x88;
+        let step = cpu.step(&mut mem);
+        assert_eq!(cpu.get_reg16(Reg16::D), 0, "TFR 0,D");
+        assert_eq!(step.operands, "0,D");
+        cpu.w = 0x9A00;
+        cpu.step(&mut mem);
+        assert_eq!(cpu.y, 0x9A9A, "TFR E,Y duplicates E");
+    }
+
+    #[test]
+    fn hd6309_tfr_exg_native_cycles() {
+        let mut cpu = Cpu::new();
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.mode_reg = 0x01;
+        cpu.pc = 0x0100;
+        let mut mem = mem_with_program(0x0100, &[0x1F, 0x12, 0x1E, 0x12]);
+        assert_eq!(cpu.step(&mut mem).cycles, 4, "TFR native");
+        assert_eq!(cpu.step(&mut mem).cycles, 5, "EXG native");
+    }
+
+    #[test]
+    fn hd6309_set_register_masks_e_f_md() {
+        let mut cpu = Cpu::new();
+        cpu.variant = CpuVariant::Hd6309;
+        cpu.w = 0x1234;
+        cpu.set_register("F", 0xABCD).unwrap();
+        assert_eq!(cpu.w, 0x12CD);
+        cpu.set_register("E", 0x0199).unwrap();
+        assert_eq!(cpu.w, 0x99CD);
+        cpu.set_register("MD", 0xFF).unwrap();
+        assert_eq!(cpu.mode_reg, 0xC3);
     }
 
     #[test]
@@ -2659,17 +2937,18 @@ mod tests {
     }
 
     #[test]
-    fn reset_clears_w_v_mode_reg() {
+    fn reset_clears_md_but_keeps_v_and_w() {
         let mut cpu = Cpu::new();
+        cpu.variant = CpuVariant::Hd6309;
         cpu.w = 0x1234;
         cpu.v = 0x5678;
-        cpu.mode_reg = 0xFF;
+        cpu.mode_reg = 0xC3;
         let mut mem = Memory::new();
         mem.write16(0xFFFE, 0x0100);
         cpu.reset(&mem);
-        assert_eq!(cpu.w, 0, "reset must clear W");
-        assert_eq!(cpu.v, 0, "reset must clear V");
-        assert_eq!(cpu.mode_reg, 0, "reset must clear MD");
+        assert_eq!(cpu.mode_reg, 0, "reset must clear MD (emulation mode)");
+        assert_eq!(cpu.v, 0x5678, "V survives a reset (MAME, Burke)");
+        assert_eq!(cpu.w, 0x1234, "W is not touched by a reset (MAME)");
     }
 
     #[test]
@@ -2682,14 +2961,14 @@ mod tests {
     }
 
     #[test]
-    fn branch_not_taken_is_2_cycles() {
+    fn branch_not_taken_is_3_cycles() {
         let mut cpu = Cpu::new();
-        // BNE with Z flag set → not taken
+        // BNE with Z flag set → not taken; short branches always take 3 cycles.
         cpu.cc.insert(Flags::Z);
         let mut mem = mem_with_program(0x0100, &[0x26, 0x05]);
         cpu.pc = 0x0100;
         let step = cpu.step(&mut mem);
-        assert_eq!(step.cycles, 2, "BNE not taken = 2 cycles");
+        assert_eq!(step.cycles, 3, "BNE not taken = 3 cycles (MC6809 datasheet)");
         assert_eq!(cpu.pc, 0x0102, "PC must advance past branch instruction");
     }
 }
